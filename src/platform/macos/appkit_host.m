@@ -75,6 +75,7 @@ static BOOL ZeroNativePolicyListMatches(NSArray<NSString *> *values, NSURL *url)
 - (BOOL)createOverlayInWindow:(uint64_t)windowId label:(NSString *)label url:(NSString *)url x:(double)x y:(double)y width:(double)width height:(double)height;
 - (BOOL)setOverlayFrameInWindow:(uint64_t)windowId label:(NSString *)label x:(double)x y:(double)y width:(double)width height:(double)height;
 - (BOOL)navigateOverlayInWindow:(uint64_t)windowId label:(NSString *)label url:(NSString *)url;
+- (BOOL)setOverlayZoomInWindow:(uint64_t)windowId label:(NSString *)label zoom:(double)zoom;
 - (BOOL)closeOverlayInWindow:(uint64_t)windowId label:(NSString *)label;
 - (void)closeOverlaysInWindow:(uint64_t)windowId;
 - (void)configureApplication;
@@ -402,6 +403,14 @@ static BOOL ZeroNativePolicyListMatches(NSArray<NSString *> *values, NSURL *url)
     return YES;
 }
 
+- (BOOL)setOverlayZoomInWindow:(uint64_t)windowId label:(NSString *)label zoom:(double)zoom {
+    if (label.length == 0 || zoom < 0.25 || zoom > 5.0) return NO;
+    WKWebView *overlay = self.overlayWebViews[[self overlayKeyForWindow:windowId label:label]];
+    if (!overlay) return NO;
+    overlay.pageZoom = zoom;
+    return YES;
+}
+
 - (BOOL)closeOverlayInWindow:(uint64_t)windowId label:(NSString *)label {
     NSString *key = [self overlayKeyForWindow:windowId label:label];
     WKWebView *overlay = self.overlayWebViews[key];
@@ -468,8 +477,14 @@ static NSString *ZeroNativeAppKitBridgeScript(void) {
         "});"
         "}"
         "function selector(value){return typeof value==='number'?{id:value}:{label:String(value)};}"
-        "function framePayload(options){options=options||{};var frame=options.frame||options;return {label:options.label,windowId:options.windowId,url:options.url,frame:{x:frame.x||0,y:frame.y||0,width:frame.width,height:frame.height}};}"
-        "function webviewHandle(info){return Object.freeze({label:info.label,windowId:info.windowId,setFrame:function(frame){return webviews.setFrame({label:info.label,windowId:info.windowId,frame:frame});},navigate:function(url){return webviews.navigate({label:info.label,windowId:info.windowId,url:url});},close:function(){return webviews.close({label:info.label,windowId:info.windowId});}});}"
+        "function ensureString(value,name){if(typeof value!=='string'||value.length===0){throw new TypeError(name+' must be a non-empty string');}return value;}"
+        "function ensureNumber(value,name){if(typeof value!=='number'||!isFinite(value)){throw new TypeError(name+' must be a finite number');}return value;}"
+        "function validateOverlaySelector(options){if(options.label!=null){ensureString(options.label,'label');}if(options.windowId!=null&&(typeof options.windowId!=='number'||!isFinite(options.windowId)||options.windowId<0||Math.floor(options.windowId)!==options.windowId)){throw new TypeError('windowId must be a non-negative integer');}}"
+        "function framePayload(options){options=options||{};validateOverlaySelector(options);var frame=options.frame||options;return {label:options.label,windowId:options.windowId,url:options.url,frame:{x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')}};}"
+        "function createPayload(options){options=options||{};ensureString(options.url,'url');return framePayload(options);}"
+        "function navigatePayload(options){options=options||{};validateOverlaySelector(options);ensureString(options.url,'url');return {label:options.label,windowId:options.windowId,url:options.url};}"
+        "function closePayload(options){options=options||{};validateOverlaySelector(options);return {label:options.label,windowId:options.windowId};}"
+        "function webviewHandle(info){return Object.freeze({label:info.label,windowId:info.windowId,setFrame:function(frame){return webviews.setFrame({label:info.label,windowId:info.windowId,frame:frame});},navigate:function(url){return webviews.navigate({label:info.label,windowId:info.windowId,url:url});},setZoom:function(zoom){return webviews.setZoom({label:info.label,windowId:info.windowId,zoom:zoom});},close:function(){return webviews.close({label:info.label,windowId:info.windowId});}});}"
         "function on(name,callback){if(typeof callback!=='function'){throw new TypeError('callback must be a function');}var set=listeners.get(name);if(!set){set=new Set();listeners.set(name,set);}set.add(callback);return function(){off(name,callback);};}"
         "function off(name,callback){var set=listeners.get(name);if(set){set.delete(callback);if(set.size===0){listeners.delete(name);}}}"
         "function emit(name,detail){var set=listeners.get(name);if(set){Array.from(set).forEach(function(callback){callback(detail);});}window.dispatchEvent(new CustomEvent('zero-native:'+name,{detail:detail}));}"
@@ -484,11 +499,13 @@ static NSString *ZeroNativeAppKitBridgeScript(void) {
         "saveFile:function(options){return invoke('zero-native.dialog.saveFile',options||{});},"
         "showMessage:function(options){return invoke('zero-native.dialog.showMessage',options||{});}"
         "});"
+        "function zoomPayload(options){options=options||{};validateOverlaySelector(options);return {label:options.label,windowId:options.windowId,zoom:ensureNumber(options.zoom,'zoom')};}"
         "var webviews=Object.freeze({"
-        "create:function(options){return invoke('zero-native.overlay.create',framePayload(options||{})).then(webviewHandle);},"
-        "setFrame:function(options){return invoke('zero-native.overlay.setFrame',framePayload(options||{}));},"
-        "navigate:function(options){if(typeof options==='string'){options={url:options};}options=options||{};return invoke('zero-native.overlay.navigate',{label:options.label,windowId:options.windowId,url:options.url});},"
-        "close:function(options){if(typeof options==='string'){options={label:options};}options=options||{};return invoke('zero-native.overlay.close',{label:options.label,windowId:options.windowId});}"
+        "create:function(options){return invoke('zero-native.overlay.create',createPayload(options)).then(webviewHandle);},"
+        "setFrame:function(options){return invoke('zero-native.overlay.setFrame',framePayload(options));},"
+        "navigate:function(options){return invoke('zero-native.overlay.navigate',navigatePayload(options));},"
+        "setZoom:function(options){return invoke('zero-native.overlay.setZoom',zoomPayload(options));},"
+        "close:function(options){return invoke('zero-native.overlay.close',closePayload(options));}"
         "});"
         "Object.defineProperty(window,'zero',{value:Object.freeze({invoke:invoke,on:on,off:off,windows:windows,dialogs:dialogs,webviews:webviews,_complete:complete,_emit:emit}),configurable:false});"
         "})();";
@@ -1046,6 +1063,12 @@ int zero_native_appkit_navigate_overlay(zero_native_appkit_host_t *host, uint64_
     NSString *labelString = label ? [[NSString alloc] initWithBytes:label length:label_len encoding:NSUTF8StringEncoding] : @"";
     NSString *urlString = url ? [[NSString alloc] initWithBytes:url length:url_len encoding:NSUTF8StringEncoding] : @"";
     return [object navigateOverlayInWindow:window_id label:labelString ?: @"" url:urlString ?: @""] ? 1 : 0;
+}
+
+int zero_native_appkit_set_overlay_zoom(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, double zoom) {
+    ZeroNativeAppKitHost *object = (__bridge ZeroNativeAppKitHost *)host;
+    NSString *labelString = label ? [[NSString alloc] initWithBytes:label length:label_len encoding:NSUTF8StringEncoding] : @"";
+    return [object setOverlayZoomInWindow:window_id label:labelString ?: @"" zoom:zoom] ? 1 : 0;
 }
 
 int zero_native_appkit_close_overlay(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len) {

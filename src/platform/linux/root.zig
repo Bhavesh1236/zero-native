@@ -339,6 +339,7 @@ fn closeWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!
 
 fn createOverlay(context: ?*anyopaque, options: platform_mod.OverlayOptions) anyerror!void {
     const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine == .chromium) return error.UnsupportedService;
     const frame = options.frame;
     if (zero_native_gtk_create_overlay(self.host, options.window_id, options.label.ptr, options.label.len, options.url.ptr, options.url.len, frame.x, frame.y, frame.width, frame.height) == 0) return error.CreateFailed;
 }

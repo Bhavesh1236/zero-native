@@ -271,7 +271,13 @@ static const char *ZeroNativeCefBridgeScript() {
         "});"
         "}"
         "function selector(value){return typeof value==='number'?{id:value}:{label:String(value)};}"
-        "function framePayload(options){options=options||{};var frame=options.frame||options;return {label:options.label,windowId:options.windowId,url:options.url,frame:{x:frame.x||0,y:frame.y||0,width:frame.width,height:frame.height}};}"
+        "function ensureString(value,name){if(typeof value!=='string'||value.length===0){throw new TypeError(name+' must be a non-empty string');}return value;}"
+        "function ensureNumber(value,name){if(typeof value!=='number'||!isFinite(value)){throw new TypeError(name+' must be a finite number');}return value;}"
+        "function validateOverlaySelector(options){if(options.label!=null){ensureString(options.label,'label');}if(options.windowId!=null&&(typeof options.windowId!=='number'||!isFinite(options.windowId)||options.windowId<0||Math.floor(options.windowId)!==options.windowId)){throw new TypeError('windowId must be a non-negative integer');}}"
+        "function framePayload(options){options=options||{};validateOverlaySelector(options);var frame=options.frame||options;return {label:options.label,windowId:options.windowId,url:options.url,frame:{x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')}};}"
+        "function createPayload(options){options=options||{};ensureString(options.url,'url');return framePayload(options);}"
+        "function navigatePayload(options){options=options||{};validateOverlaySelector(options);ensureString(options.url,'url');return {label:options.label,windowId:options.windowId,url:options.url};}"
+        "function closePayload(options){options=options||{};validateOverlaySelector(options);return {label:options.label,windowId:options.windowId};}"
         "function webviewHandle(info){return Object.freeze({label:info.label,windowId:info.windowId,setFrame:function(frame){return webviews.setFrame({label:info.label,windowId:info.windowId,frame:frame});},navigate:function(url){return webviews.navigate({label:info.label,windowId:info.windowId,url:url});},close:function(){return webviews.close({label:info.label,windowId:info.windowId});}});}"
         "function on(name,callback){if(typeof callback!=='function'){throw new TypeError('callback must be a function');}var set=listeners.get(name);if(!set){set=new Set();listeners.set(name,set);}set.add(callback);return function(){off(name,callback);};}"
         "function off(name,callback){var set=listeners.get(name);if(set){set.delete(callback);if(set.size===0){listeners.delete(name);}}}"
@@ -288,10 +294,10 @@ static const char *ZeroNativeCefBridgeScript() {
         "showMessage:function(options){return invoke('zero-native.dialog.showMessage',options||{});}"
         "});"
         "var webviews=Object.freeze({"
-        "create:function(options){return invoke('zero-native.overlay.create',framePayload(options||{})).then(webviewHandle);},"
-        "setFrame:function(options){return invoke('zero-native.overlay.setFrame',framePayload(options||{}));},"
-        "navigate:function(options){if(typeof options==='string'){options={url:options};}options=options||{};return invoke('zero-native.overlay.navigate',{label:options.label,windowId:options.windowId,url:options.url});},"
-        "close:function(options){if(typeof options==='string'){options={label:options};}options=options||{};return invoke('zero-native.overlay.close',{label:options.label,windowId:options.windowId});}"
+        "create:function(options){return invoke('zero-native.overlay.create',createPayload(options)).then(webviewHandle);},"
+        "setFrame:function(options){return invoke('zero-native.overlay.setFrame',framePayload(options));},"
+        "navigate:function(options){return invoke('zero-native.overlay.navigate',navigatePayload(options));},"
+        "close:function(options){return invoke('zero-native.overlay.close',closePayload(options));}"
         "});"
         "Object.defineProperty(window,'zero',{value:Object.freeze({invoke:invoke,on:on,off:off,windows:windows,dialogs:dialogs,webviews:webviews,_complete:complete,_emit:emit}),configurable:false});"
         "})();";
@@ -333,6 +339,7 @@ static const char *ZeroNativeCefBridgeScript() {
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *windowLabels;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *fallbackURLs;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSView *> *overlayViews;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *overlayPendingURLs;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) NSString *appName;
 @property(nonatomic, assign) zero_native_appkit_event_callback_t callback;
@@ -448,6 +455,7 @@ static const char *ZeroNativeCefBridgeScript() {
     self.windowLabels = [[NSMutableDictionary alloc] init];
     self.fallbackURLs = [[NSMutableDictionary alloc] init];
     self.overlayViews = [[NSMutableDictionary alloc] init];
+    self.overlayPendingURLs = [[NSMutableDictionary alloc] init];
     self.cefClients = new std::map<uint64_t, CefRefPtr<ZeroNativeCefClient>>();
     self.browsers = new std::map<uint64_t, CefRefPtr<CefBrowser>>();
     self.overlayCefClients = new std::map<std::string, CefRefPtr<ZeroNativeCefClient>>();
@@ -840,7 +848,8 @@ static const char *ZeroNativeCefBridgeScript() {
             return YES;
         }
     }
-    return NO;
+    self.overlayPendingURLs[[self overlayKeyForWindow:windowId label:label]] = url;
+    return YES;
 }
 
 - (BOOL)closeOverlayInWindow:(uint64_t)windowId label:(NSString *)label {
@@ -855,6 +864,7 @@ static const char *ZeroNativeCefBridgeScript() {
         }
         self.overlayBrowsers->erase(keyString);
     }
+    [self.overlayPendingURLs removeObjectForKey:key];
     if (self.overlayCefClients) self.overlayCefClients->erase(keyString);
     [overlay removeFromSuperview];
     [self.overlayViews removeObjectForKey:key];
@@ -874,6 +884,7 @@ static const char *ZeroNativeCefBridgeScript() {
             }
             self.overlayBrowsers->erase(keyString);
         }
+        [self.overlayPendingURLs removeObjectForKey:key];
         if (self.overlayCefClients) self.overlayCefClients->erase(keyString);
         [self.overlayViews[key] removeFromSuperview];
         [self.overlayViews removeObjectForKey:key];
@@ -917,6 +928,11 @@ static const char *ZeroNativeCefBridgeScript() {
 - (void)setOverlayBrowser:(CefRefPtr<CefBrowser>)browser key:(NSString *)key {
     if (!self.overlayBrowsers || key.length == 0) return;
     (*self.overlayBrowsers)[std::string(key.UTF8String)] = browser;
+    NSString *pendingURL = self.overlayPendingURLs[key];
+    if (pendingURL.length > 0 && browser) {
+        browser->GetMainFrame()->LoadURL(std::string(pendingURL.UTF8String));
+        [self.overlayPendingURLs removeObjectForKey:key];
+    }
 }
 
 - (NSString *)fallbackURLForWindowId:(uint64_t)windowId {

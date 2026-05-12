@@ -264,50 +264,47 @@ int zero_native_gtk_close_window(Host *host, uint64_t window_id) {
 }
 
 int zero_native_gtk_create_overlay(Host *host, uint64_t window_id, const char *label, size_t label_len, const char *url, size_t url_len, double x, double y, double width, double height) {
-    if (!host || label_len == 0 || url_len == 0 || !validOverlayFrame(x, y, width, height)) return 0;
-    auto window = host->windows.find(window_id);
-    if (window == host->windows.end() || !window->second.open) return 0;
-    std::string label_string = slice(label, label_len);
-    std::string key = overlayKey(window_id, label_string);
-    if (host->overlays.find(key) != host->overlays.end()) return 0;
-    Overlay overlay;
-    overlay.window_id = window_id;
-    overlay.label = label_string;
-    overlay.url = slice(url, url_len);
-    overlay.x = x;
-    overlay.y = y;
-    overlay.width = width;
-    overlay.height = height;
-    overlay.open = true;
-    host->overlays[key] = overlay;
-    return 1;
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)url;
+    (void)url_len;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    return 0;
 }
 
 int zero_native_gtk_set_overlay_frame(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height) {
-    if (!host || label_len == 0 || !validOverlayFrame(x, y, width, height)) return 0;
-    auto found = host->overlays.find(overlayKey(window_id, slice(label, label_len)));
-    if (found == host->overlays.end() || !found->second.open) return 0;
-    found->second.x = x;
-    found->second.y = y;
-    found->second.width = width;
-    found->second.height = height;
-    return 1;
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    return 0;
 }
 
 int zero_native_gtk_navigate_overlay(Host *host, uint64_t window_id, const char *label, size_t label_len, const char *url, size_t url_len) {
-    if (!host || label_len == 0 || url_len == 0) return 0;
-    auto found = host->overlays.find(overlayKey(window_id, slice(label, label_len)));
-    if (found == host->overlays.end() || !found->second.open) return 0;
-    found->second.url = slice(url, url_len);
-    return 1;
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)url;
+    (void)url_len;
+    return 0;
 }
 
 int zero_native_gtk_close_overlay(Host *host, uint64_t window_id, const char *label, size_t label_len) {
-    if (!host || label_len == 0) return 0;
-    auto found = host->overlays.find(overlayKey(window_id, slice(label, label_len)));
-    if (found == host->overlays.end()) return 0;
-    host->overlays.erase(found);
-    return 1;
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    return 0;
 }
 
 size_t zero_native_gtk_clipboard_read(Host *host, char *buffer, size_t buffer_len) {

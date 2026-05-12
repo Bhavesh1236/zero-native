@@ -39,7 +39,7 @@ fn runNull(app: zero_native.App, options: RunOptions, init: std.process.Init) !v
 }
 
 fn runMacos(app: zero_native.App, options: RunOptions, init: std.process.Init) !void {
-    var mac_platform = try zero_native.platform.macos.MacPlatform.initWithOptions(zero_native.geometry.SizeF.init(960, 720), webEngine(), options.appInfo());
+    var mac_platform = try zero_native.platform.macos.MacPlatform.initWithOptions(zero_native.geometry.SizeF.init(1120, 780), webEngine(), options.appInfo());
     defer mac_platform.deinit();
     try runRuntime(app, options, init, mac_platform.platform());
 }

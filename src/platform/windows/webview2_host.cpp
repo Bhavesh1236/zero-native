@@ -8,6 +8,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #if __has_include(<WebView2.h>) && __has_include(<wrl.h>)
 #include <WebView2.h>
@@ -87,6 +88,9 @@ struct Host {
     bool running = false;
     std::map<uint64_t, Window> windows;
     std::map<std::string, Overlay> overlays;
+    std::vector<std::string> allowed_origins;
+    std::vector<std::string> allowed_external_urls;
+    int external_link_action = 0;
 };
 
 static std::string slice(const char *bytes, size_t len) {
@@ -99,6 +103,57 @@ static std::wstring widen(const std::string &value) {
     std::wstring out((size_t)count, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, value.data(), (int)value.size(), out.data(), count);
     return out;
+}
+
+static std::string narrow(const std::wstring &value) {
+    if (value.empty()) return std::string();
+    int count = WideCharToMultiByte(CP_UTF8, 0, value.data(), (int)value.size(), nullptr, 0, nullptr, nullptr);
+    std::string out((size_t)count, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.data(), (int)value.size(), out.data(), count, nullptr, nullptr);
+    return out;
+}
+
+static std::vector<std::string> parseNewlineList(const char *bytes, size_t len) {
+    std::vector<std::string> result;
+    if (!bytes || len == 0) return result;
+    const char *start = bytes;
+    const char *end = bytes + len;
+    while (start < end) {
+        const char *nl = static_cast<const char *>(memchr(start, '\n', (size_t)(end - start)));
+        size_t seg_len = nl ? (size_t)(nl - start) : (size_t)(end - start);
+        while (seg_len > 0 && (*start == ' ' || *start == '\t')) {
+            ++start;
+            --seg_len;
+        }
+        while (seg_len > 0 && (start[seg_len - 1] == ' ' || start[seg_len - 1] == '\t' || start[seg_len - 1] == '\r')) --seg_len;
+        if (seg_len > 0) result.emplace_back(start, seg_len);
+        start = nl ? nl + 1 : end;
+    }
+    return result;
+}
+
+static std::string originForUrl(const std::string &url) {
+    if (url.empty() || url.rfind("about:", 0) == 0) return "zero://inline";
+    size_t scheme_end = url.find("://");
+    if (scheme_end == std::string::npos) return "zero://inline";
+    if (url.compare(0, scheme_end, "file") == 0) return "file://local";
+    size_t host_start = scheme_end + 3;
+    size_t host_end = host_start;
+    while (host_end < url.size() && url[host_end] != '/' && url[host_end] != '?' && url[host_end] != '#') ++host_end;
+    if (host_end == host_start) return url.substr(0, scheme_end) + "://local";
+    return url.substr(0, host_end);
+}
+
+static bool policyListMatches(const std::vector<std::string> &values, const std::string &url) {
+    std::string origin = originForUrl(url);
+    for (const std::string &value : values) {
+        if (value == "*" || value == origin || value == url) return true;
+        if (!value.empty() && value.back() == '*') {
+            const std::string prefix = value.substr(0, value.size() - 1);
+            if (url.rfind(prefix, 0) == 0 || origin.rfind(prefix, 0) == 0) return true;
+        }
+    }
+    return false;
 }
 
 static size_t boundedLen(const char *text, size_t limit) {
@@ -177,18 +232,17 @@ static CreateEnvironmentFn webView2Factory() {
     return reinterpret_cast<CreateEnvironmentFn>(GetProcAddress(loader, "CreateCoreWebView2EnvironmentWithOptions"));
 }
 
-static void createOverlayWebView(Host *host, const std::string &key) {
+static bool createOverlayWebView(Host *host, const std::string &key) {
     auto factory = webView2Factory();
-    if (!factory) return;
+    if (!factory) return false;
     auto found = host->overlays.find(key);
-    if (found == host->overlays.end() || !found->second.hwnd) return;
+    if (found == host->overlays.end() || !found->second.hwnd) return false;
     HWND parent = found->second.hwnd;
-    std::wstring initial_url = widen(found->second.url);
-    factory(nullptr, nullptr, nullptr, Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-        [host, key, parent, initial_url](HRESULT result, ICoreWebView2Environment *environment) -> HRESULT {
+    HRESULT hr = factory(nullptr, nullptr, nullptr, Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+        [host, key, parent](HRESULT result, ICoreWebView2Environment *environment) -> HRESULT {
             if (FAILED(result) || !environment) return result;
             return environment->CreateCoreWebView2Controller(parent, Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                [host, key, initial_url](HRESULT controller_result, ICoreWebView2Controller *controller) -> HRESULT {
+                [host, key](HRESULT controller_result, ICoreWebView2Controller *controller) -> HRESULT {
                     if (FAILED(controller_result) || !controller) return controller_result;
                     auto found = host->overlays.find(key);
                     if (found == host->overlays.end()) {
@@ -200,12 +254,29 @@ static void createOverlayWebView(Host *host, const std::string &key) {
                     RECT bounds = overlayRect(found->second);
                     controller->put_Bounds(bounds);
                     controller->put_IsVisible(TRUE);
-                    if (found->second.webview && !initial_url.empty()) {
-                        found->second.webview->Navigate(initial_url.c_str());
+                    if (found->second.webview) {
+                        EventRegistrationToken token = {};
+                        found->second.webview->add_NavigationStarting(Callback<ICoreWebView2NavigationStartingEventHandler>(
+                            [host](ICoreWebView2 *, ICoreWebView2NavigationStartingEventArgs *args) -> HRESULT {
+                                LPWSTR uri_bytes = nullptr;
+                                if (!args || FAILED(args->get_Uri(&uri_bytes))) return S_OK;
+                                std::wstring uri_wide = uri_bytes ? std::wstring(uri_bytes) : std::wstring();
+                                if (uri_bytes) CoTaskMemFree(uri_bytes);
+                                std::string uri = narrow(uri_wide);
+                                if (uri.empty() || uri.rfind("about:", 0) == 0 || policyListMatches(host->allowed_origins, uri)) return S_OK;
+                                if (host->external_link_action == 1 && policyListMatches(host->allowed_external_urls, uri)) {
+                                    ShellExecuteW(nullptr, L"open", uri_wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                                }
+                                args->put_Cancel(TRUE);
+                                return S_OK;
+                            }).Get(), &token);
+                        std::wstring latest_url = widen(found->second.url);
+                        if (!latest_url.empty()) found->second.webview->Navigate(latest_url.c_str());
                     }
                     return S_OK;
                 }).Get());
         }).Get());
+    return SUCCEEDED(hr);
 }
 #endif
 
@@ -407,12 +478,10 @@ void zero_native_windows_emit_window_event(Host *host, uint64_t window_id, const
 }
 
 void zero_native_windows_set_security_policy(Host *host, const char *allowed_origins, size_t allowed_origins_len, const char *external_urls, size_t external_urls_len, int external_action) {
-    (void)host;
-    (void)allowed_origins;
-    (void)allowed_origins_len;
-    (void)external_urls;
-    (void)external_urls_len;
-    (void)external_action;
+    if (!host) return;
+    host->allowed_origins = parseNewlineList(allowed_origins, allowed_origins_len);
+    host->allowed_external_urls = parseNewlineList(external_urls, external_urls_len);
+    host->external_link_action = external_action;
 }
 
 int zero_native_windows_create_window(Host *host, uint64_t window_id, const char *window_title, size_t window_title_len, const char *window_label, size_t window_label_len, double x, double y, double width, double height, int restore_frame) {
@@ -427,8 +496,9 @@ int zero_native_windows_create_window(Host *host, uint64_t window_id, const char
     window.width = width;
     window.height = height;
     bool ok = createNativeWindow(host, window);
+    if (!ok) return 0;
     host->windows[window_id] = window;
-    return ok ? 1 : 0;
+    return 1;
 }
 
 int zero_native_windows_focus_window(Host *host, uint64_t window_id) {
@@ -450,6 +520,19 @@ int zero_native_windows_close_window(Host *host, uint64_t window_id) {
 }
 
 int zero_native_windows_create_overlay(Host *host, uint64_t window_id, const char *label, size_t label_len, const char *url, size_t url_len, double x, double y, double width, double height) {
+#if !ZERO_NATIVE_HAS_WEBVIEW2
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)url;
+    (void)url_len;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    return 0;
+#else
     if (!host || label_len == 0 || url_len == 0 || !validOverlayFrame(x, y, width, height)) return 0;
     auto window = host->windows.find(window_id);
     if (window == host->windows.end() || !window->second.hwnd) return 0;
@@ -483,13 +566,13 @@ int zero_native_windows_create_overlay(Host *host, uint64_t window_id, const cha
     overlay.width = width;
     overlay.height = height;
     host->overlays[key] = overlay;
-#if ZERO_NATIVE_HAS_WEBVIEW2
-    createOverlayWebView(host, key);
-#else
-    std::wstring title = widen(url_string);
-    SetWindowTextW(hwnd, title.c_str());
-#endif
+    if (!createOverlayWebView(host, key)) {
+        DestroyWindow(hwnd);
+        host->overlays.erase(key);
+        return 0;
+    }
     return 1;
+#endif
 }
 
 int zero_native_windows_set_overlay_frame(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height) {
@@ -511,20 +594,26 @@ int zero_native_windows_set_overlay_frame(Host *host, uint64_t window_id, const 
 }
 
 int zero_native_windows_navigate_overlay(Host *host, uint64_t window_id, const char *label, size_t label_len, const char *url, size_t url_len) {
+#if !ZERO_NATIVE_HAS_WEBVIEW2
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)url;
+    (void)url_len;
+    return 0;
+#else
     if (!host || label_len == 0 || url_len == 0) return 0;
     auto found = host->overlays.find(overlayKey(window_id, slice(label, label_len)));
     if (found == host->overlays.end() || !found->second.hwnd) return 0;
     found->second.url = slice(url, url_len);
-#if ZERO_NATIVE_HAS_WEBVIEW2
     if (found->second.webview) {
         std::wstring target = widen(found->second.url);
         found->second.webview->Navigate(target.c_str());
         return 1;
     }
-#endif
-    std::wstring title = widen(found->second.url);
-    SetWindowTextW(found->second.hwnd, title.c_str());
     return 1;
+#endif
 }
 
 int zero_native_windows_close_overlay(Host *host, uint64_t window_id, const char *label, size_t label_len) {

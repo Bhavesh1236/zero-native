@@ -311,6 +311,7 @@ pub const PlatformServices = struct {
     create_overlay_fn: ?*const fn (context: ?*anyopaque, options: OverlayOptions) anyerror!void = null,
     set_overlay_frame_fn: ?*const fn (context: ?*anyopaque, window_id: WindowId, label: []const u8, frame: geometry.RectF) anyerror!void = null,
     navigate_overlay_fn: ?*const fn (context: ?*anyopaque, window_id: WindowId, label: []const u8, url: []const u8) anyerror!void = null,
+    set_overlay_zoom_fn: ?*const fn (context: ?*anyopaque, window_id: WindowId, label: []const u8, zoom: f64) anyerror!void = null,
     close_overlay_fn: ?*const fn (context: ?*anyopaque, window_id: WindowId, label: []const u8) anyerror!void = null,
     show_open_dialog_fn: ?*const fn (context: ?*anyopaque, options: OpenDialogOptions, buffer: []u8) anyerror!OpenDialogResult = null,
     show_save_dialog_fn: ?*const fn (context: ?*anyopaque, options: SaveDialogOptions, buffer: []u8) anyerror!?[]const u8 = null,
@@ -383,6 +384,11 @@ pub const PlatformServices = struct {
     pub fn navigateOverlay(self: PlatformServices, window_id: WindowId, label: []const u8, url: []const u8) anyerror!void {
         const navigate_fn = self.navigate_overlay_fn orelse return error.UnsupportedService;
         return navigate_fn(self.context, window_id, label, url);
+    }
+
+    pub fn setOverlayZoom(self: PlatformServices, window_id: WindowId, label: []const u8, zoom: f64) anyerror!void {
+        const zoom_fn = self.set_overlay_zoom_fn orelse return error.UnsupportedService;
+        return zoom_fn(self.context, window_id, label, zoom);
     }
 
     pub fn closeOverlay(self: PlatformServices, window_id: WindowId, label: []const u8) anyerror!void {

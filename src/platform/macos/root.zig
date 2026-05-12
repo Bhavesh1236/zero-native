@@ -54,6 +54,7 @@ extern fn zero_native_appkit_close_window(host: *AppKitHost, window_id: u64) c_i
 extern fn zero_native_appkit_create_overlay(host: *AppKitHost, window_id: u64, label: [*]const u8, label_len: usize, url: [*]const u8, url_len: usize, x: f64, y: f64, width: f64, height: f64) c_int;
 extern fn zero_native_appkit_set_overlay_frame(host: *AppKitHost, window_id: u64, label: [*]const u8, label_len: usize, x: f64, y: f64, width: f64, height: f64) c_int;
 extern fn zero_native_appkit_navigate_overlay(host: *AppKitHost, window_id: u64, label: [*]const u8, label_len: usize, url: [*]const u8, url_len: usize) c_int;
+extern fn zero_native_appkit_set_overlay_zoom(host: *AppKitHost, window_id: u64, label: [*]const u8, label_len: usize, zoom: f64) c_int;
 extern fn zero_native_appkit_close_overlay(host: *AppKitHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
 extern fn zero_native_appkit_clipboard_read(host: *AppKitHost, buffer: [*]u8, buffer_len: usize) usize;
 extern fn zero_native_appkit_clipboard_write(host: *AppKitHost, text: [*]const u8, text_len: usize) void;
@@ -167,6 +168,7 @@ pub const MacPlatform = struct {
                 .create_overlay_fn = createOverlay,
                 .set_overlay_frame_fn = setOverlayFrame,
                 .navigate_overlay_fn = navigateOverlay,
+                .set_overlay_zoom_fn = setOverlayZoom,
                 .close_overlay_fn = closeOverlay,
                 .show_open_dialog_fn = showOpenDialog,
                 .show_save_dialog_fn = showSaveDialog,
@@ -355,6 +357,11 @@ fn setOverlayFrame(context: ?*anyopaque, window_id: platform_mod.WindowId, label
 fn navigateOverlay(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8, url: []const u8) anyerror!void {
     const self: *MacPlatform = @ptrCast(@alignCast(context.?));
     if (zero_native_appkit_navigate_overlay(self.host, window_id, label.ptr, label.len, url.ptr, url.len) == 0) return error.OverlayNotFound;
+}
+
+fn setOverlayZoom(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8, zoom: f64) anyerror!void {
+    const self: *MacPlatform = @ptrCast(@alignCast(context.?));
+    if (zero_native_appkit_set_overlay_zoom(self.host, window_id, label.ptr, label.len, zoom) == 0) return error.OverlayNotFound;
 }
 
 fn closeOverlay(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8) anyerror!void {

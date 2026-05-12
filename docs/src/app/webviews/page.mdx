@@ -33,7 +33,7 @@ await preview.close();
 
 Coordinates are logical content coordinates relative to the parent window: `x: 0, y: 0` is the top-left corner of the window content area.
 
-`windowId` defaults to `1`, the main window. Pass the `id` returned by `window.zero.windows.create()` when the overlay should attach to a secondary window.
+`windowId` defaults to the window that calls the command. Pass the `id` returned by `window.zero.windows.create()` when one window should create or manage an overlay in another window.
 
 You can also enable the same helpers with an explicit `builtin_bridge` policy instead of `js_window_api`. In that mode, list every overlay command your app calls: `zero-native.overlay.create`, `zero-native.overlay.setFrame`, `zero-native.overlay.navigate`, and `zero-native.overlay.close`.
 
@@ -41,7 +41,9 @@ You can also enable the same helpers with an explicit `builtin_bridge` policy in
 
 Overlay labels are unique per parent window. Creating a second overlay with the same label fails; close the existing overlay first if you want to replace it.
 
-When a parent window closes, its overlays are closed with it. Overlay pages do not receive `window.zero`, so untrusted content cannot call native bridge commands through the app bridge.
+When a parent window closes, its overlays are closed with it. Overlay pages do not receive `window.zero` by default, so untrusted content cannot call native bridge commands through the app bridge.
+
+Overlay slots are capped globally per runtime, not per window. The default cap is 16 overlays.
 
 ## Commands
 
@@ -80,3 +82,7 @@ The helper calls these built-in bridge commands internally:
 </table>
 
 Overlay URLs are checked against the runtime navigation policy before native views are created or navigated. Add the target origin to `security.navigation.allowed_origins` before loading it.
+
+## Backend Support
+
+System WebView overlays are implemented on macOS and Linux. Windows overlays require WebView2; if WebView2 is unavailable, creating an overlay fails instead of showing a placeholder. Chromium/CEF overlay support is available on macOS; the Linux CEF host currently fails overlay creation until a real native CEF overlay implementation is wired in.

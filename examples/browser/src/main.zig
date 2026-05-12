@@ -11,6 +11,7 @@ const builtin_policies = [_]zero_native.BridgeCommandPolicy{
     .{ .name = "zero-native.overlay.create", .permissions = &window_permission, .origins = &bridge_origins },
     .{ .name = "zero-native.overlay.setFrame", .permissions = &window_permission, .origins = &bridge_origins },
     .{ .name = "zero-native.overlay.navigate", .permissions = &window_permission, .origins = &bridge_origins },
+    .{ .name = "zero-native.overlay.setZoom", .permissions = &window_permission, .origins = &bridge_origins },
     .{ .name = "zero-native.overlay.close", .permissions = &window_permission, .origins = &bridge_origins },
 };
 
@@ -32,8 +33,8 @@ const BrowserApp = struct {
 pub fn main(init: std.process.Init) !void {
     var app = BrowserApp{};
     try runner.runWithOptions(app.app(), .{
-        .app_name = "browser",
-        .window_title = "zero-native Browser",
+        .app_name = "Zero Browser",
+        .window_title = "Zero Browser",
         .bundle_id = "dev.zero_native.browser",
         .icon_path = "assets/icon.icns",
         .builtin_bridge = .{ .enabled = true, .commands = &builtin_policies },

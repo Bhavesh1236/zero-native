@@ -74,6 +74,8 @@ Window commands are available through `window.zero.windows.*` when `js_window_ap
 
 Overlay commands are available through `window.zero.webviews.*` when `js_window_api` is `true`. They use the same origin and `window` permission checks as window commands. Overlay URLs are also checked against `security.navigation.allowed_origins`.
 
+If `windowId` is omitted, the runtime uses the window that sent the bridge message. Overlay pages are isolated by default and do not receive `window.zero`.
+
 ## Dialog commands
 
 <table>

@@ -6,8 +6,17 @@ export type ZeroNativeJson =
   | ZeroNativeJson[]
   | { [key: string]: ZeroNativeJson };
 
+export type ZeroNativeErrorCode =
+  | "invalid_request"
+  | "unknown_command"
+  | "permission_denied"
+  | "handler_failed"
+  | "payload_too_large"
+  | "internal_error"
+  | string;
+
 export interface ZeroNativeInvokeError extends Error {
-  code: "invalid_request" | "unknown_command" | "permission_denied" | "handler_failed" | "payload_too_large" | "internal_error" | string;
+  code: ZeroNativeErrorCode;
 }
 
 export interface ZeroNativeWindowInfo {
@@ -49,7 +58,7 @@ export interface ZeroNativeWebViewInfo {
 export interface ZeroNativeCreateWebViewOptions {
   /** Stable label for this overlay WebView. Defaults to "overlay". Unique per parent window. */
   label?: string;
-  /** Parent native window id. Defaults to the main window, 1. */
+  /** Parent native window id. Defaults to the window that calls the command. */
   windowId?: number;
   /** Target URL. Its origin must be listed in the runtime navigation policy. */
   url: string;
@@ -113,12 +122,12 @@ export interface ZeroNativeApi {
     focus(value: number | string): Promise<ZeroNativeWindowInfo>;
     close(value: number | string): Promise<ZeroNativeWindowInfo>;
   };
+  /** Native overlay WebViews are isolated by default and do not receive `window.zero`. */
   webviews: {
     create(options: ZeroNativeCreateWebViewOptions): Promise<ZeroNativeWebViewHandle>;
     setFrame(options: ZeroNativeSetWebViewFrameOptions): Promise<ZeroNativeWebViewInfo>;
     navigate(options: ZeroNativeNavigateWebViewOptions): Promise<ZeroNativeWebViewInfo>;
-    navigate(url: string): Promise<ZeroNativeWebViewInfo>;
-    close(options?: ZeroNativeCloseWebViewOptions | string): Promise<ZeroNativeWebViewInfo>;
+    close(options?: ZeroNativeCloseWebViewOptions): Promise<ZeroNativeWebViewInfo>;
   };
   dialogs: {
     openFile(options?: ZeroNativeOpenFileOptions): Promise<string[] | null>;
