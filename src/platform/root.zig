@@ -769,7 +769,20 @@ pub const NullPlatform = struct {
         if (index >= self.webview_count) return;
         var cursor = index;
         while (cursor + 1 < self.webview_count) : (cursor += 1) {
-            self.webviews[cursor] = self.webviews[cursor + 1];
+            const next = self.webviews[cursor + 1];
+            self.webviews[cursor] = .{
+                .window_id = next.window_id,
+                .frame = next.frame,
+                .layer = next.layer,
+                .transparent = next.transparent,
+                .bridge_enabled = next.bridge_enabled,
+                .zoom = next.zoom,
+                .open = next.open,
+            };
+            @memcpy(self.webviews[cursor].label_storage[0..next.label.len], next.label);
+            @memcpy(self.webviews[cursor].url_storage[0..next.url.len], next.url);
+            self.webviews[cursor].label = self.webviews[cursor].label_storage[0..next.label.len];
+            self.webviews[cursor].url = self.webviews[cursor].url_storage[0..next.url.len];
         }
         self.webview_count -= 1;
     }
@@ -909,6 +922,37 @@ test "null platform records webview lifecycle" {
     try std.testing.expectEqualStrings("https://example.org", null_platform.webviews[0].url);
     try services.closeWebView(1, "preview");
     try std.testing.expectEqual(@as(usize, 0), null_platform.webview_count);
+}
+
+test "null platform preserves shifted webview storage after close" {
+    var null_platform = NullPlatform.init(.{});
+    const services = null_platform.platform().services;
+
+    try services.createWebView(.{
+        .label = "first",
+        .url = "https://example.com/first",
+        .frame = geometry.RectF.init(10, 20, 300, 200),
+    });
+    try services.createWebView(.{
+        .label = "second",
+        .url = "https://example.com/second",
+        .frame = geometry.RectF.init(10, 20, 300, 200),
+    });
+
+    try services.closeWebView(1, "first");
+    try std.testing.expectEqual(@as(usize, 1), null_platform.webview_count);
+    try std.testing.expectEqualStrings("second", null_platform.webviews[0].label);
+    try std.testing.expectEqualStrings("https://example.com/second", null_platform.webviews[0].url);
+
+    try services.createWebView(.{
+        .label = "third",
+        .url = "https://example.com/third",
+        .frame = geometry.RectF.init(10, 20, 300, 200),
+    });
+    try std.testing.expectEqualStrings("second", null_platform.webviews[0].label);
+    try std.testing.expectEqualStrings("https://example.com/second", null_platform.webviews[0].url);
+    try std.testing.expectEqualStrings("third", null_platform.webviews[1].label);
+    try std.testing.expectEqualStrings("https://example.com/third", null_platform.webviews[1].url);
 }
 
 test "null platform requires an open main window for main webview operations" {
