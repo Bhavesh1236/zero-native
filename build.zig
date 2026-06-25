@@ -134,6 +134,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(embed_lib);
 
     const automation_protocol_mod = module(b, target, optimize, "src/automation/protocol.zig");
+    const automation_protocol_tests = testArtifact(b, automation_protocol_mod);
     const tooling_mod = module(b, target, optimize, "src/tooling/root.zig");
     tooling_mod.addImport("assets", assets_mod);
     tooling_mod.addImport("app_dirs", app_dirs_mod);
@@ -171,6 +172,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(platform_info_tests).step);
     test_step.dependOn(&b.addRunArtifact(json_tests).step);
     test_step.dependOn(&b.addRunArtifact(desktop_tests).step);
+    test_step.dependOn(&b.addRunArtifact(automation_protocol_tests).step);
     test_step.dependOn(&b.addRunArtifact(tooling_tests).step);
 
     addTestStep(b, "test-geometry", "Run geometry module tests", geometry_tests);
@@ -182,6 +184,7 @@ pub fn build(b: *std.Build) void {
     addTestStep(b, "test-platform-info", "Run platform info module tests", platform_info_tests);
     addTestStep(b, "test-json", "Run JSON primitive tests", json_tests);
     addTestStep(b, "test-desktop", "Run zero-native framework tests", desktop_tests);
+    addTestStep(b, "test-automation-protocol", "Run automation protocol tests", automation_protocol_tests);
     addTestStep(b, "test-tooling", "Run zero-native tooling tests", tooling_tests);
 
     const run_hello = b.addSystemCommand(&.{ "zig", "build", "run", b.fmt("-Dplatform={s}", .{platform_arg}), b.fmt("-Dtrace={s}", .{@tagName(trace_option)}) });
@@ -338,6 +341,36 @@ pub fn build(b: *std.Build) void {
         \\case "$snapshot" in *'view @w1/main kind=webview'*) ;; *) echo "main WebView was missing from snapshot" >&2; exit 1 ;; esac
         \\case "$snapshot" in *'view @w1/statusbar kind=statusbar'*) ;; *) echo "statusbar view was missing from snapshot" >&2; exit 1 ;; esac
         \\case "$snapshot" in *'view @w1/refresh-icon kind=icon_button'*'accessibility_label="Refresh workspace"'*) ;; *) echo "refresh icon accessibility metadata was missing from snapshot" >&2; exit 1 ;; esac
+        \\"$cli" automate focus refresh-button >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  focus_line="$(printf '%s\n' "$snapshot" | grep -F 'view @w1/refresh-button kind=button' || true)"
+        \\  case "$focus_line" in *'focused=true'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$focus_line" in *'focused=true'*) ;; *) echo "native-shell refresh button did not receive focus" >&2; exit 1 ;; esac
+        \\"$cli" automate focus-next >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  focus_line="$(printf '%s\n' "$snapshot" | grep -F 'view @w1/palette-button kind=button' || true)"
+        \\  case "$focus_line" in *'focused=true'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$focus_line" in *'focused=true'*) ;; *) echo "native-shell focus-next did not move focus to palette button" >&2; exit 1 ;; esac
+        \\"$cli" automate focus-previous >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  focus_line="$(printf '%s\n' "$snapshot" | grep -F 'view @w1/refresh-button kind=button' || true)"
+        \\  case "$focus_line" in *'focused=true'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$focus_line" in *'focused=true'*) ;; *) echo "native-shell focus-previous did not return focus to refresh button" >&2; exit 1 ;; esac
         \\"$cli" automate resize 900 640 >/dev/null 2>&1
         \\attempts=0
         \\while [ "$attempts" -lt 50 ]; do

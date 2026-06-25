@@ -11,6 +11,7 @@
 
 static const NSUInteger ZeroNativeMaxChildWebViews = 16;
 static const NSUInteger ZeroNativeMaxNativeViews = 32;
+static const NSInteger ZeroNativeBridgeFrameKeepaliveFrames = 600;
 static const uint32_t ZeroNativeShortcutModifierPrimary = 1u << 0;
 static const uint32_t ZeroNativeShortcutModifierCommand = 1u << 1;
 static const uint32_t ZeroNativeShortcutModifierControl = 1u << 2;
@@ -1624,7 +1625,7 @@ static NSURL *ZeroNativeAssetEntryURL(NSString *origin, NSString *entryPath) {
 }
 
 - (void)scheduleBridgeFrames {
-    self.bridgeFrameKeepalive = 30;
+    self.bridgeFrameKeepalive = ZeroNativeBridgeFrameKeepaliveFrames;
     [self scheduleFrame];
 }
 

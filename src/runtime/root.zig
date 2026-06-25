@@ -1012,6 +1012,15 @@ pub const Runtime = struct {
                     .window_id = 1,
                 } });
             },
+            .focus_view => {
+                try self.focusView(1, try parseAutomationViewLabel(command.value));
+            },
+            .focus_next_view => {
+                _ = try self.focusNextView(1);
+            },
+            .focus_previous_view => {
+                _ = try self.focusPreviousView(1);
+            },
             .wait => {},
         }
     }
@@ -3094,6 +3103,12 @@ fn parseAutomationCommandName(value: []const u8) ![]const u8 {
     return trimmed[0..separator];
 }
 
+fn parseAutomationViewLabel(value: []const u8) ![]const u8 {
+    const trimmed = std.mem.trim(u8, value, " \n\r\t");
+    if (trimmed.len == 0) return error.InvalidCommand;
+    return trimmed;
+}
+
 fn parseAutomationNativeCommand(value: []const u8) !AutomationNativeCommand {
     const trimmed = std.mem.trim(u8, value, " \n\r\t");
     if (trimmed.len == 0) return error.InvalidCommand;
@@ -3137,6 +3152,12 @@ test "runtime parses automation resize commands" {
     try std.testing.expectError(error.InvalidCommand, parseAutomationResizeCommand("0 640"));
     try std.testing.expectError(error.InvalidCommand, parseAutomationResizeCommand("900 nan"));
     try std.testing.expectError(error.InvalidCommand, parseAutomationResizeCommand("900 640 1 2"));
+}
+
+test "runtime parses automation focus view labels" {
+    const label = try parseAutomationViewLabel(" refresh-button \n");
+    try std.testing.expectEqualStrings("refresh-button", label);
+    try std.testing.expectError(error.InvalidCommand, parseAutomationViewLabel(""));
 }
 
 fn validateCommandName(name: []const u8) !void {
