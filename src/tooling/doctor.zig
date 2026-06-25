@@ -106,7 +106,7 @@ pub fn reportForCurrentHost() platform_info.DoctorReport {
             platform_info.DoctorCheck.ok("hdiutil", "hdiutil is available for macOS .dmg creation"),
             platform_info.DoctorCheck.ok("iconutil", "iconutil is available for .icns generation from .iconset"),
             platform_info.DoctorCheck.ok("ios-static-lib", "Use `zig build lib -Dtarget=aarch64-ios` to build the iOS static library"),
-            platform_info.DoctorCheck.ok("android-static-lib", "Use `zig build lib -Dtarget=aarch64-android` to build the Android static library"),
+            platform_info.DoctorCheck.ok("android-static-lib", "Use `zig build lib -Dtarget=aarch64-linux-android` to build the Android static library"),
         };
     };
     State.gpu = .{
@@ -181,7 +181,7 @@ pub fn reportForCurrentHostWithProbe(
         try buffers.add("webview-chromium", .available, "Chromium backend is available; configure app.zon or pass --web-engine chromium to check CEF", .{});
     }
     try buffers.add("ios-static-lib", .available, "Use `zig build lib -Dtarget=aarch64-ios` to build the iOS static library", .{});
-    try buffers.add("android-static-lib", .available, "Use `zig build lib -Dtarget=aarch64-android` to build the Android static library", .{});
+    try buffers.add("android-static-lib", .available, "Use `zig build lib -Dtarget=aarch64-linux-android` to build the Android static library", .{});
 
     return .{
         .host = .{
