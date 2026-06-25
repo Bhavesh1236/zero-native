@@ -912,6 +912,7 @@ fn isSupportedNativeViewKind(kind: platform_mod.ViewKind) bool {
         .split,
         .stack,
         .button,
+        .icon_button,
         .checkbox,
         .toggle,
         .segmented_control,
@@ -927,9 +928,10 @@ fn isSupportedNativeViewKind(kind: platform_mod.ViewKind) bool {
     };
 }
 
-test "linux supports split and stack native containers" {
+test "linux supports native container and control kinds" {
     try std.testing.expect(isSupportedNativeViewKind(.split));
     try std.testing.expect(isSupportedNativeViewKind(.stack));
+    try std.testing.expect(isSupportedNativeViewKind(.icon_button));
     try std.testing.expect(!isSupportedNativeViewKind(.gpu_surface));
 }
 
@@ -943,6 +945,7 @@ fn viewKindInt(kind: platform_mod.ViewKind) c_int {
         .split => 5,
         .stack => 6,
         .button => 7,
+        .icon_button => 17,
         .text_field => 8,
         .search_field => 9,
         .label => 10,

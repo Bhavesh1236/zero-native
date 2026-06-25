@@ -140,6 +140,8 @@ export type ZeroNativeViewKind =
   | "split"
   | "stack"
   | "button"
+  | "icon_button"
+  | "iconButton"
   | "checkbox"
   | "toggle"
   | "segmented_control"

@@ -801,6 +801,7 @@ fn parseViewKind(value: []const u8) !app_manifest.ViewKind {
     if (std.mem.eql(u8, value, "split")) return .split;
     if (std.mem.eql(u8, value, "stack")) return .stack;
     if (std.mem.eql(u8, value, "button")) return .button;
+    if (std.mem.eql(u8, value, "icon_button")) return .icon_button;
     if (std.mem.eql(u8, value, "checkbox")) return .checkbox;
     if (std.mem.eql(u8, value, "toggle")) return .toggle;
     if (std.mem.eql(u8, value, "segmented_control")) return .segmented_control;
@@ -964,6 +965,7 @@ test "manifest metadata parser reads shell windows and views" {
         \\          .{ .label = "toolbar", .kind = "toolbar", .edge = "top", .height = 44, .role = "toolbar" },
         \\          .{ .label = "content", .kind = "webview", .url = "zero://app/index.html", .fill = true },
         \\          .{ .label = "status", .kind = "statusbar", .edge = "bottom", .height = 24, .text = "Ready" },
+        \\          .{ .label = "refresh-icon", .kind = "icon_button", .parent = "toolbar", .text = "R", .command = "app.refresh.icon" },
         \\          .{ .label = "save", .kind = "button", .parent = "toolbar", .text = "Save", .command = "app.save" },
         \\          .{ .label = "mode", .kind = "segmented_control", .parent = "toolbar", .text = "List|Grid", .command = "app.view.mode" },
         \\          .{ .label = "syncing", .kind = "progress_indicator", .parent = "toolbar", .role = "Syncing" },
@@ -980,15 +982,17 @@ test "manifest metadata parser reads shell windows and views" {
     try std.testing.expectEqualStrings("toolbar", metadata.shell.windows[0].views[0].kind);
     try std.testing.expectEqualStrings("zero://app/index.html", metadata.shell.windows[0].views[1].url.?);
     try std.testing.expect(metadata.shell.windows[0].views[1].fill);
-    try std.testing.expectEqualStrings("app.save", metadata.shell.windows[0].views[3].command.?);
-    try std.testing.expectEqualStrings("segmented_control", metadata.shell.windows[0].views[4].kind);
-    try std.testing.expectEqualStrings("progress_indicator", metadata.shell.windows[0].views[5].kind);
+    try std.testing.expectEqualStrings("icon_button", metadata.shell.windows[0].views[3].kind);
+    try std.testing.expectEqualStrings("app.save", metadata.shell.windows[0].views[4].command.?);
+    try std.testing.expectEqualStrings("segmented_control", metadata.shell.windows[0].views[5].kind);
+    try std.testing.expectEqualStrings("progress_indicator", metadata.shell.windows[0].views[6].kind);
 
     const shell = try parseShell(std.testing.allocator, metadata.shell);
     defer deinitParsedShell(std.testing.allocator, shell);
     try std.testing.expectEqual(app_manifest.ViewKind.webview, shell.windows[0].views[1].kind);
-    try std.testing.expectEqual(app_manifest.ViewKind.segmented_control, shell.windows[0].views[4].kind);
-    try std.testing.expectEqual(app_manifest.ViewKind.progress_indicator, shell.windows[0].views[5].kind);
+    try std.testing.expectEqual(app_manifest.ViewKind.icon_button, shell.windows[0].views[3].kind);
+    try std.testing.expectEqual(app_manifest.ViewKind.segmented_control, shell.windows[0].views[5].kind);
+    try std.testing.expectEqual(app_manifest.ViewKind.progress_indicator, shell.windows[0].views[6].kind);
     try std.testing.expectEqual(app_manifest.ShellEdge.top, shell.windows[0].views[0].edge.?);
     try app_manifest.validateManifest(.{
         .identity = .{ .id = metadata.id, .name = metadata.name },

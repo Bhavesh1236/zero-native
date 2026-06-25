@@ -372,6 +372,7 @@ pub const ViewKind = enum {
     split,
     stack,
     button,
+    icon_button,
     checkbox,
     toggle,
     segmented_control,

@@ -37,6 +37,7 @@
 #define ZERO_NATIVE_GTK_VIEW_TOGGLE 14
 #define ZERO_NATIVE_GTK_VIEW_PROGRESS_INDICATOR 15
 #define ZERO_NATIVE_GTK_VIEW_SEGMENTED_CONTROL 16
+#define ZERO_NATIVE_GTK_VIEW_ICON_BUTTON 17
 
 typedef struct zero_native_gtk_shortcut {
     char *id;
@@ -280,6 +281,7 @@ static int zero_native_is_native_container_kind(int kind) {
 static int zero_native_is_supported_native_view_kind(int kind) {
     return zero_native_is_native_container_kind(kind) ||
         kind == ZERO_NATIVE_GTK_VIEW_BUTTON ||
+        kind == ZERO_NATIVE_GTK_VIEW_ICON_BUTTON ||
         kind == ZERO_NATIVE_GTK_VIEW_CHECKBOX ||
         kind == ZERO_NATIVE_GTK_VIEW_TOGGLE ||
         kind == ZERO_NATIVE_GTK_VIEW_SEGMENTED_CONTROL ||
@@ -357,6 +359,12 @@ static GtkWidget *zero_native_make_native_widget(int kind, const char *label, co
             return gtk_fixed_new();
         case ZERO_NATIVE_GTK_VIEW_BUTTON:
             return gtk_button_new_with_label(display_text[0] ? display_text : "Button");
+        case ZERO_NATIVE_GTK_VIEW_ICON_BUTTON: {
+            GtkWidget *button = gtk_button_new_with_label(display_text[0] ? display_text : "...");
+            gtk_widget_add_css_class(button, "flat");
+            gtk_widget_add_css_class(button, "circular");
+            return button;
+        }
         case ZERO_NATIVE_GTK_VIEW_CHECKBOX:
             return gtk_check_button_new_with_label(display_text[0] ? display_text : "Checkbox");
         case ZERO_NATIVE_GTK_VIEW_TOGGLE:

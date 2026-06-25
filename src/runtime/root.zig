@@ -2390,6 +2390,7 @@ fn shellViewKind(kind: app_manifest.ViewKind) platform.ViewKind {
         .split => .split,
         .stack => .stack,
         .button => .button,
+        .icon_button => .icon_button,
         .checkbox => .checkbox,
         .toggle => .toggle,
         .segmented_control => .segmented_control,
@@ -2470,6 +2471,7 @@ fn defaultDockWidth(kind: app_manifest.ViewKind) f32 {
 fn defaultShellViewWidth(kind: app_manifest.ViewKind) f32 {
     return switch (kind) {
         .button, .checkbox, .toggle => 96,
+        .icon_button => 32,
         .segmented_control => 168,
         .label => 160,
         .spacer => 12,
@@ -2482,7 +2484,7 @@ fn defaultShellViewWidth(kind: app_manifest.ViewKind) f32 {
 
 fn defaultShellViewHeight(kind: app_manifest.ViewKind, parent_height: f32) f32 {
     return switch (kind) {
-        .button, .checkbox, .toggle, .segmented_control => 32,
+        .button, .icon_button, .checkbox, .toggle, .segmented_control => 32,
         .label => 24,
         .spacer => @max(parent_height, 1),
         .progress_indicator => 24,
@@ -2924,6 +2926,7 @@ fn viewKindFromString(value: []const u8) ?platform.ViewKind {
         if (std.mem.eql(u8, value, field.name)) return @field(platform.ViewKind, field.name);
     }
     if (std.mem.eql(u8, value, "titlebarAccessory")) return .titlebar_accessory;
+    if (std.mem.eql(u8, value, "iconButton")) return .icon_button;
     if (std.mem.eql(u8, value, "segmentedControl")) return .segmented_control;
     if (std.mem.eql(u8, value, "textField")) return .text_field;
     if (std.mem.eql(u8, value, "searchField")) return .search_field;
@@ -3281,6 +3284,7 @@ test "runtime materializes manifest shell windows into laid out views" {
         .{ .label = "toolbar-search", .kind = .search_field, .parent = "toolbar", .text = "Search" },
         .{ .label = "toolbar-progress", .kind = .progress_indicator, .parent = "toolbar", .role = "Syncing" },
         .{ .label = "toolbar-mode", .kind = .segmented_control, .parent = "toolbar", .text = "List|Grid", .command = "app.view.mode" },
+        .{ .label = "toolbar-icon", .kind = .icon_button, .parent = "toolbar", .text = "R", .command = "app.refresh.icon" },
         .{ .label = "toolbar", .kind = .toolbar, .edge = .top, .height = 52, .role = "Toolbar" },
         .{ .label = "sidebar-live", .kind = .checkbox, .parent = "sidebar", .x = 18, .y = 92, .text = "Live" },
         .{ .label = "sidebar-mode", .kind = .toggle, .parent = "sidebar", .x = 18, .y = 128, .text = "Mode" },
@@ -3313,6 +3317,7 @@ test "runtime materializes manifest shell windows into laid out views" {
     const search = testViewByLabel(views, "toolbar-search").?;
     const progress = testViewByLabel(views, "toolbar-progress").?;
     const mode = testViewByLabel(views, "toolbar-mode").?;
+    const icon = testViewByLabel(views, "toolbar-icon").?;
     const sidebar = testViewByLabel(views, "sidebar").?;
     const checkbox = testViewByLabel(views, "sidebar-live").?;
     const toggle = testViewByLabel(views, "sidebar-mode").?;
@@ -3358,6 +3363,15 @@ test "runtime materializes manifest shell windows into laid out views" {
     try std.testing.expectEqual(@as(f32, 10), mode.frame.y);
     try std.testing.expectEqual(@as(f32, 168), mode.frame.width);
     try std.testing.expectEqual(@as(f32, 32), mode.frame.height);
+
+    try std.testing.expectEqual(platform.ViewKind.icon_button, icon.kind);
+    try std.testing.expectEqualStrings("toolbar", icon.parent.?);
+    try std.testing.expectEqualStrings("R", icon.text);
+    try std.testing.expectEqualStrings("app.refresh.icon", icon.command);
+    try std.testing.expectEqual(@as(f32, 548), icon.frame.x);
+    try std.testing.expectEqual(@as(f32, 10), icon.frame.y);
+    try std.testing.expectEqual(@as(f32, 32), icon.frame.width);
+    try std.testing.expectEqual(@as(f32, 32), icon.frame.height);
 
     try std.testing.expectEqual(platform.ViewKind.sidebar, sidebar.kind);
     try std.testing.expectEqual(@as(f32, 0), sidebar.frame.x);

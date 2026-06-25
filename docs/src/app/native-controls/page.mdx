@@ -5,6 +5,7 @@ Native controls are platform-owned views declared with `App.scene_fn`, attached 
 ```zig
 const shell_views = [_]zero_native.ShellView{
     .{ .label = "toolbar", .kind = .toolbar, .edge = .top, .height = 52 },
+    .{ .label = "refresh-icon", .kind = .icon_button, .parent = "toolbar", .text = "R", .command = "app.refresh" },
     .{ .label = "refresh", .kind = .button, .parent = "toolbar", .text = "Refresh", .command = "app.refresh" },
     .{ .label = "search", .kind = .search_field, .parent = "toolbar", .text = "Search" },
     .{ .label = "live", .kind = .checkbox, .parent = "toolbar", .text = "Live" },
@@ -38,6 +39,7 @@ fn scene(context: *anyopaque) anyerror!zero_native.ShellConfig {
 | `split` | Native container for split-pane shell regions |
 | `stack` | Native container for grouped child controls |
 | `button` | Dispatches `command` through `Event.command` |
+| `icon_button` | Compact command button for toolbar-style actions |
 | `checkbox` | Native checkbox control |
 | `toggle` | Native binary toggle button |
 | `segmented_control` | Native segmented choice control; use pipe-delimited `text`, such as `List|Grid` |

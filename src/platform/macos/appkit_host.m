@@ -567,6 +567,12 @@ static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSStrin
             view = button;
             break;
         }
+        case ZERO_NATIVE_APPKIT_VIEW_ICON_BUTTON: {
+            NSButton *button = [NSButton buttonWithTitle:(displayText.length > 0 ? displayText : @"...") target:nil action:nil];
+            button.bezelStyle = NSBezelStyleTexturedRounded;
+            view = button;
+            break;
+        }
         case ZERO_NATIVE_APPKIT_VIEW_CHECKBOX: {
             NSButton *checkbox = [NSButton checkboxWithTitle:(displayText.length > 0 ? displayText : @"Checkbox") target:nil action:nil];
             view = checkbox;
