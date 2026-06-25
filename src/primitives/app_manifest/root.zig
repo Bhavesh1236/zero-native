@@ -114,12 +114,23 @@ pub const CapabilityKind = enum {
     native_module,
     webview,
     js_bridge,
+    native_views,
+    menus,
+    shortcuts,
+    tray,
     filesystem,
     network,
     notifications,
     dialog,
     clipboard,
     credentials,
+    open_url,
+    reveal_path,
+    recent_documents,
+    file_drops,
+    app_activation_events,
+    file_associations,
+    url_schemes,
     custom,
 };
 
@@ -127,12 +138,23 @@ pub const Capability = union(CapabilityKind) {
     native_module: void,
     webview: void,
     js_bridge: void,
+    native_views: void,
+    menus: void,
+    shortcuts: void,
+    tray: void,
     filesystem: void,
     network: void,
     notifications: void,
     dialog: void,
     clipboard: void,
     credentials: void,
+    open_url: void,
+    reveal_path: void,
+    recent_documents: void,
+    file_drops: void,
+    app_activation_events: void,
+    file_associations: void,
+    url_schemes: void,
     custom: []const u8,
 
     pub fn kind(self: Capability) CapabilityKind {
@@ -1321,7 +1343,25 @@ test "platform validation catches duplicates and invalid overrides" {
 }
 
 test "capability validation catches duplicates and invalid custom names" {
-    try validateCapabilities(&.{ .native_module, .webview, .notifications, .dialog, .credentials, .{ .custom = "com.example.native-camera" } });
+    try validateCapabilities(&.{
+        .native_module,
+        .webview,
+        .native_views,
+        .menus,
+        .shortcuts,
+        .tray,
+        .notifications,
+        .dialog,
+        .credentials,
+        .open_url,
+        .reveal_path,
+        .recent_documents,
+        .file_drops,
+        .app_activation_events,
+        .file_associations,
+        .url_schemes,
+        .{ .custom = "com.example.native-camera" },
+    });
     try std.testing.expectError(error.DuplicateCapability, validateCapabilities(&.{ .webview, .webview }));
     try std.testing.expectError(error.DuplicateCapability, validateCapabilities(&.{ .{ .custom = "custom" }, .{ .custom = "custom" } }));
     try std.testing.expectError(error.InvalidName, validateCapabilities(&.{.{ .custom = "bad/name" }}));

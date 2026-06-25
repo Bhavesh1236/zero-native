@@ -8,7 +8,7 @@ zero-native treats the WebView as untrusted by default. App authors opt into nat
 
 ```zig
 .permissions = .{ "command", "view", "dialog", "window", "filesystem" },
-.capabilities = .{ "webview", "js_bridge", "dialog" },
+.capabilities = .{ "webview", "js_bridge", "native_views", "dialog", "filesystem" },
 ```
 
 ### Available permissions
@@ -97,6 +97,22 @@ Custom permissions use reverse-DNS names (e.g. `com.example.my-permission`). Use
       <td>Native Zig extension modules</td>
     </tr>
     <tr>
+      <td><code>native_views</code></td>
+      <td>Native shell views, chrome, controls, and utility panels</td>
+    </tr>
+    <tr>
+      <td><code>menus</code></td>
+      <td>Native app and window menus</td>
+    </tr>
+    <tr>
+      <td><code>shortcuts</code></td>
+      <td>Keyboard shortcut registration</td>
+    </tr>
+    <tr>
+      <td><code>tray</code></td>
+      <td>System tray integration</td>
+    </tr>
+    <tr>
       <td><code>filesystem</code></td>
       <td>File system access</td>
     </tr>
@@ -119,6 +135,34 @@ Custom permissions use reverse-DNS names (e.g. `com.example.my-permission`). Use
     <tr>
       <td><code>credentials</code></td>
       <td>Credential store access</td>
+    </tr>
+    <tr>
+      <td><code>open_url</code></td>
+      <td>Open URLs with the system browser</td>
+    </tr>
+    <tr>
+      <td><code>reveal_path</code></td>
+      <td>Reveal local paths in the platform file manager</td>
+    </tr>
+    <tr>
+      <td><code>recent_documents</code></td>
+      <td>Platform recent document registration</td>
+    </tr>
+    <tr>
+      <td><code>file_drops</code></td>
+      <td>Native file drop events</td>
+    </tr>
+    <tr>
+      <td><code>app_activation_events</code></td>
+      <td>App activate and deactivate lifecycle events</td>
+    </tr>
+    <tr>
+      <td><code>file_associations</code></td>
+      <td>Package metadata for file type registration</td>
+    </tr>
+    <tr>
+      <td><code>url_schemes</code></td>
+      <td>Package metadata for URL scheme registration</td>
     </tr>
   </tbody>
 </table>

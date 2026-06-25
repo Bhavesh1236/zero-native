@@ -688,12 +688,23 @@ fn parseCapability(value: []const u8) !app_manifest.Capability {
     if (std.mem.eql(u8, value, "native_module")) return .native_module;
     if (std.mem.eql(u8, value, "webview")) return .webview;
     if (std.mem.eql(u8, value, "js_bridge")) return .js_bridge;
+    if (std.mem.eql(u8, value, "native_views")) return .native_views;
+    if (std.mem.eql(u8, value, "menus")) return .menus;
+    if (std.mem.eql(u8, value, "shortcuts")) return .shortcuts;
+    if (std.mem.eql(u8, value, "tray")) return .tray;
     if (std.mem.eql(u8, value, "filesystem")) return .filesystem;
     if (std.mem.eql(u8, value, "network")) return .network;
     if (std.mem.eql(u8, value, "notifications")) return .notifications;
     if (std.mem.eql(u8, value, "dialog")) return .dialog;
     if (std.mem.eql(u8, value, "clipboard")) return .clipboard;
     if (std.mem.eql(u8, value, "credentials")) return .credentials;
+    if (std.mem.eql(u8, value, "open_url")) return .open_url;
+    if (std.mem.eql(u8, value, "reveal_path")) return .reveal_path;
+    if (std.mem.eql(u8, value, "recent_documents")) return .recent_documents;
+    if (std.mem.eql(u8, value, "file_drops")) return .file_drops;
+    if (std.mem.eql(u8, value, "app_activation_events")) return .app_activation_events;
+    if (std.mem.eql(u8, value, "file_associations")) return .file_associations;
+    if (std.mem.eql(u8, value, "url_schemes")) return .url_schemes;
     return error.InvalidCapability;
 }
 
@@ -889,7 +900,11 @@ test "manifest metadata parser reads identity version and lists" {
         \\  .version = "1.2.3",
         \\  .icons = .{ "assets/icon.png" },
         \\  .platforms = .{ "macos", "linux" },
-        \\  .capabilities = .{ "native_module", "webview", "js_bridge", "dialog", "credentials" },
+        \\  .capabilities = .{
+        \\    "native_module", "webview", "js_bridge", "native_views", "menus", "shortcuts", "tray",
+        \\    "dialog", "credentials", "file_drops", "file_associations", "url_schemes",
+        \\    "open_url", "reveal_path", "recent_documents", "app_activation_events",
+        \\  },
         \\  .bridge = .{ .commands = .{ .{ .name = "native.ping" } } },
         \\  .web_engine = "chromium",
         \\  .cef = .{ .dir = "third_party/cef/macos", .auto_install = true },
@@ -913,8 +928,23 @@ test "manifest metadata parser reads identity version and lists" {
     try std.testing.expectEqualStrings("assets/icon.png", metadata.icons[0]);
     try std.testing.expectEqualStrings("linux", metadata.platforms[1]);
     try std.testing.expectEqualStrings("webview", metadata.capabilities[1]);
-    try std.testing.expectEqualStrings("dialog", metadata.capabilities[3]);
-    try std.testing.expectEqualStrings("credentials", metadata.capabilities[4]);
+    try std.testing.expectEqualStrings("native_views", metadata.capabilities[3]);
+    try std.testing.expectEqualStrings("dialog", metadata.capabilities[7]);
+    try std.testing.expectEqualStrings("file_drops", metadata.capabilities[9]);
+    try std.testing.expectEqualStrings("url_schemes", metadata.capabilities[11]);
+    const parsed_capabilities = try parseCapabilities(std.testing.allocator, metadata.capabilities);
+    defer std.testing.allocator.free(parsed_capabilities);
+    try std.testing.expectEqual(app_manifest.CapabilityKind.native_views, parsed_capabilities[3].kind());
+    try std.testing.expectEqual(app_manifest.CapabilityKind.menus, parsed_capabilities[4].kind());
+    try std.testing.expectEqual(app_manifest.CapabilityKind.shortcuts, parsed_capabilities[5].kind());
+    try std.testing.expectEqual(app_manifest.CapabilityKind.tray, parsed_capabilities[6].kind());
+    try std.testing.expectEqual(app_manifest.CapabilityKind.file_drops, parsed_capabilities[9].kind());
+    try std.testing.expectEqual(app_manifest.CapabilityKind.file_associations, parsed_capabilities[10].kind());
+    try std.testing.expectEqual(app_manifest.CapabilityKind.url_schemes, parsed_capabilities[11].kind());
+    try std.testing.expectEqual(app_manifest.CapabilityKind.open_url, parsed_capabilities[12].kind());
+    try std.testing.expectEqual(app_manifest.CapabilityKind.reveal_path, parsed_capabilities[13].kind());
+    try std.testing.expectEqual(app_manifest.CapabilityKind.recent_documents, parsed_capabilities[14].kind());
+    try std.testing.expectEqual(app_manifest.CapabilityKind.app_activation_events, parsed_capabilities[15].kind());
     try std.testing.expectEqualStrings("native.ping", metadata.bridge_commands[0].name);
     try std.testing.expectEqualStrings("command.palette", metadata.shortcuts[0].id);
     try std.testing.expectEqualStrings("primary", metadata.shortcuts[0].modifiers[0]);

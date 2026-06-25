@@ -6,7 +6,7 @@
     .icons = .{ "assets/icon.icns" },
     .platforms = .{ "macos", "linux" },
     .permissions = .{ "window", "notifications", "dialog", "clipboard", "credentials" },
-    .capabilities = .{ "webview", "js_bridge", "notifications", "dialog", "clipboard", "credentials" },
+    .capabilities = .{ "webview", "js_bridge", "native_views", "notifications", "dialog", "clipboard", "credentials", "file_drops" },
     .shell = .{
         .windows = .{
             .{

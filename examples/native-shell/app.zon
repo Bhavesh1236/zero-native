@@ -6,7 +6,7 @@
     .icons = .{ "assets/icon.icns" },
     .platforms = .{ "macos", "linux" },
     .permissions = .{ "command", "view" },
-    .capabilities = .{ "webview", "js_bridge" },
+    .capabilities = .{ "webview", "js_bridge", "native_views", "menus", "shortcuts" },
     .shortcuts = .{
         .{ .id = "app.refresh", .key = "r", .modifiers = .{ "primary" } },
     },
