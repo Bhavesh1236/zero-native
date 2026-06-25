@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) void {
     const trace_option = b.option(TraceOption, "trace", "Trace output: off, events, runtime, all") orelse .events;
     _ = b.option(bool, "debug-overlay", "Enable debug overlay output") orelse false;
     _ = b.option(bool, "automation", "Enable zero-native automation artifacts") orelse false;
-    _ = b.option(bool, "webview", "Deprecated: WebView is the only runtime surface") orelse true;
+    _ = b.option(bool, "webview", "Deprecated compatibility flag; native surfaces are always enabled") orelse true;
     const web_engine_override = b.option(WebEngineOption, "web-engine", "Override app.zon web engine: system, chromium");
     const cef_dir_override = b.option([]const u8, "cef-dir", "Override CEF root directory for Chromium builds");
     const cef_auto_install_override = b.option(bool, "cef-auto-install", "Override app.zon CEF auto-install setting");
@@ -241,6 +241,12 @@ pub fn build(b: *std.Build) void {
     addExampleTestStep(b, frontend_examples_step, "test-example-react", "Run React example tests", "examples/react");
     addExampleTestStep(b, frontend_examples_step, "test-example-svelte", "Run Svelte example tests", "examples/svelte");
     addExampleTestStep(b, frontend_examples_step, "test-example-vue", "Run Vue example tests", "examples/vue");
+    addFileContainsCheckStep(b, frontend_examples_step, "test-example-frontend-positioning", "Verify frontend example native shell positioning", &.{
+        .{ .path = "examples/next/README.md", .pattern = "opens the native app shell with WebView content." },
+        .{ .path = "examples/react/README.md", .pattern = "opens the native app shell with WebView content." },
+        .{ .path = "examples/svelte/README.md", .pattern = "opens the native app shell with WebView content." },
+        .{ .path = "examples/vue/README.md", .pattern = "opens the native app shell with WebView content." },
+    });
 
     const native_examples_step = b.step("test-examples-native", "Run native-first example tests");
     addExampleTestStep(b, native_examples_step, "test-example-command-app", "Run command app example tests", "examples/command-app");
