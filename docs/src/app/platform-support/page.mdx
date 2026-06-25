@@ -23,6 +23,27 @@ zero-native exposes one runtime model across desktop hosts, but native affordanc
 | File drops | Supported | Unsupported | Supported | Unsupported | Supported |
 | App activation events | Supported | Supported | Supported | Unsupported | Supported |
 
+## Runtime Queries
+
+Use `Runtime.supports(...)` when native code needs to branch on the current host:
+
+```zig
+if (runtime.supports(.native_views)) {
+    try runtime.createView(.{
+        .label = "sidebar",
+        .kind = .sidebar,
+    });
+}
+```
+
+JavaScript can query the same support model through the built-in bridge when `js_window_api` or an explicit `builtin_bridge` policy allows `zero-native.platform.supports`:
+
+```javascript
+const hasTray = await window.zero.platform.supports("tray");
+```
+
+Feature names match the Zig `PlatformFeature` enum and the TypeScript `ZeroNativePlatformFeature` union. Unsupported operations still reject explicitly if called; support checks are intended for choosing UI affordances before making those calls.
+
 ## Native Surfaces
 
 The macOS, Linux, and Windows system-WebView hosts support `toolbar`, `titlebar_accessory`, `sidebar`, `statusbar`, `split`, `stack`, `button`, `checkbox`, `toggle`, `text_field`, `search_field`, `label`, `spacer`, and `progress_indicator` native view kinds.

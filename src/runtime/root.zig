@@ -740,6 +740,10 @@ pub const Runtime = struct {
         return self.last_diagnostics;
     }
 
+    pub fn supports(self: *const Runtime, feature: platform.PlatformFeature) bool {
+        return self.options.platform.supports(feature);
+    }
+
     fn handlePlatformEvent(context: *anyopaque, event_value: platform.Event) anyerror!void {
         const run_context: *RunContext = @ptrCast(@alignCast(context));
         try run_context.runtime.dispatchPlatformEvent(run_context.app, event_value);
@@ -1092,15 +1096,16 @@ pub const Runtime = struct {
         const is_window = std.mem.startsWith(u8, request.command, "zero-native.window.");
         const is_view = std.mem.startsWith(u8, request.command, "zero-native.view.");
         const is_webview = std.mem.startsWith(u8, request.command, "zero-native.webview.");
+        const is_platform = std.mem.startsWith(u8, request.command, "zero-native.platform.");
         const is_dialog = std.mem.startsWith(u8, request.command, "zero-native.dialog.");
         const is_os = std.mem.startsWith(u8, request.command, "zero-native.os.");
         const is_clipboard = std.mem.startsWith(u8, request.command, "zero-native.clipboard.");
         const is_credentials = std.mem.startsWith(u8, request.command, "zero-native.credentials.");
-        if (!is_command and !is_window and !is_view and !is_webview and !is_dialog and !is_os and !is_clipboard and !is_credentials) return false;
+        if (!is_command and !is_window and !is_view and !is_webview and !is_platform and !is_dialog and !is_os and !is_clipboard and !is_credentials) return false;
 
         var response_buffer: [bridge.max_response_bytes]u8 = undefined;
         var result_buffer: [bridge.max_result_bytes]u8 = undefined;
-        if (!self.allowsBuiltinBridgeCommand(request.command, message.origin, is_command or is_window or is_view or is_webview)) {
+        if (!self.allowsBuiltinBridgeCommand(request.command, message.origin, is_command or is_window or is_view or is_webview or is_platform)) {
             const message_text = if (is_view)
                 "View API is not permitted"
             else if (is_webview)
@@ -1109,6 +1114,8 @@ pub const Runtime = struct {
                 "Window API is not permitted"
             else if (is_command)
                 "Command API is not permitted"
+            else if (is_platform)
+                "Platform API is not permitted"
             else if (is_os)
                 "OS API is not permitted"
             else if (is_clipboard)
@@ -1130,6 +1137,8 @@ pub const Runtime = struct {
             self.dispatchViewBridgeCommand(request, message.window_id, &result_buffer, &response_buffer)
         else if (is_webview)
             self.dispatchWebViewBridgeCommand(request, message.window_id, &result_buffer, &response_buffer)
+        else if (is_platform)
+            self.dispatchPlatformBridgeCommand(request, &result_buffer, &response_buffer)
         else if (is_dialog)
             self.dispatchDialogBridgeCommand(request, &result_buffer, &response_buffer)
         else if (is_clipboard)
@@ -1215,6 +1224,14 @@ pub const Runtime = struct {
             self.invokeCommandFromJson(app, request.payload, source_window_id, source_view_label, result_buffer) catch |err| return bridge.writeErrorResponse(response_buffer, request.id, builtinBridgeErrorCode(err), builtinBridgeErrorMessage(err))
         else
             return bridge.writeErrorResponse(response_buffer, request.id, .unknown_command, "Unknown command command");
+        return bridge.writeSuccessResponse(response_buffer, request.id, result);
+    }
+
+    fn dispatchPlatformBridgeCommand(self: *Runtime, request: bridge.Request, result_buffer: []u8, response_buffer: []u8) []const u8 {
+        const result = if (std.mem.eql(u8, request.command, "zero-native.platform.supports"))
+            self.supportsFeatureFromJson(request.payload, result_buffer) catch |err| return bridge.writeErrorResponse(response_buffer, request.id, builtinBridgeErrorCode(err), builtinBridgeErrorMessage(err))
+        else
+            return bridge.writeErrorResponse(response_buffer, request.id, .unknown_command, "Unknown platform command");
         return bridge.writeSuccessResponse(response_buffer, request.id, result);
     }
 
@@ -1347,6 +1364,14 @@ pub const Runtime = struct {
         var writer = std.Io.Writer.fixed(output);
         try json.writeString(&writer, value);
         return writer.buffered();
+    }
+
+    fn supportsFeatureFromJson(self: *Runtime, payload: []const u8, output: []u8) ![]const u8 {
+        var scratch: [64]u8 = undefined;
+        var storage = json.StringStorage.init(&scratch);
+        const feature_name = jsonStringField(payload, "feature", &storage) orelse jsonStringField(payload, "name", &storage) orelse return error.InvalidPlatformFeature;
+        const feature = platformFeatureFromString(feature_name) orelse return error.InvalidPlatformFeature;
+        return writeBoolJson(self.supports(feature), output);
     }
 
     fn writeClipboardTextFromJson(self: *Runtime, payload: []const u8, output: []u8) ![]const u8 {
@@ -2527,8 +2552,12 @@ fn writeWindowJson(window: platform.WindowInfo, output: []u8) ![]const u8 {
 }
 
 fn writeTrueJson(output: []u8) ![]const u8 {
+    return writeBoolJson(true, output);
+}
+
+fn writeBoolJson(value: bool, output: []u8) ![]const u8 {
     var writer = std.Io.Writer.fixed(output);
-    try writer.writeAll("true");
+    try writer.writeAll(if (value) "true" else "false");
     return writer.buffered();
 }
 
@@ -2695,6 +2724,7 @@ fn builtinBridgeErrorMessage(err: anyerror) []const u8 {
         error.CredentialNotFound => "Credential was not found",
         error.InvalidTrayOptions => "Tray options are invalid",
         error.TrayFieldTooLarge => "Tray field is too large",
+        error.InvalidPlatformFeature => "Platform feature is invalid",
         error.InvalidWindowOptions => "Window options are invalid",
         error.InvalidCommand => "Command name is invalid",
         error.DuplicateWindowId => "Window id already exists",
@@ -2759,6 +2789,7 @@ fn builtinBridgeErrorCode(err: anyerror) bridge.ErrorCode {
         error.CredentialFieldTooLarge,
         error.InvalidTrayOptions,
         error.TrayFieldTooLarge,
+        error.InvalidPlatformFeature,
         => .invalid_request,
         error.NavigationDenied => .invalid_request,
         else => .internal_error,
@@ -2895,6 +2926,24 @@ fn viewKindFromString(value: []const u8) ?platform.ViewKind {
     if (std.mem.eql(u8, value, "searchField")) return .search_field;
     if (std.mem.eql(u8, value, "gpuSurface")) return .gpu_surface;
     if (std.mem.eql(u8, value, "progressIndicator")) return .progress_indicator;
+    return null;
+}
+
+fn platformFeatureFromString(value: []const u8) ?platform.PlatformFeature {
+    inline for (@typeInfo(platform.PlatformFeature).@"enum".fields) |field| {
+        if (std.mem.eql(u8, value, field.name)) return @field(platform.PlatformFeature, field.name);
+    }
+    if (std.mem.eql(u8, value, "mainWebView")) return .main_webview;
+    if (std.mem.eql(u8, value, "childWebViews")) return .child_webviews;
+    if (std.mem.eql(u8, value, "nativeViews")) return .native_views;
+    if (std.mem.eql(u8, value, "nativeControlCommands")) return .native_control_commands;
+    if (std.mem.eql(u8, value, "clipboardText")) return .clipboard_text;
+    if (std.mem.eql(u8, value, "clipboardRichData")) return .clipboard_rich_data;
+    if (std.mem.eql(u8, value, "openUrl")) return .open_url;
+    if (std.mem.eql(u8, value, "revealPath")) return .reveal_path;
+    if (std.mem.eql(u8, value, "recentDocuments")) return .recent_documents;
+    if (std.mem.eql(u8, value, "fileDrops")) return .file_drops;
+    if (std.mem.eql(u8, value, "appActivationEvents")) return .app_activation_events;
     return null;
 }
 
@@ -3976,6 +4025,49 @@ test "runtime handles built-in JavaScript command bridge commands" {
     try std.testing.expectEqual(@as(u32, 2), app_state.command_count);
     try std.testing.expectEqualStrings("app.open", app_state.last_name);
     try std.testing.expectEqualStrings("toolbar", app_state.last_view_label);
+}
+
+test "runtime handles built-in JavaScript platform support commands" {
+    const TestApp = struct {
+        fn app(self: *@This()) App {
+            return .{ .context = self, .name = "platform-support", .source = platform.WebViewSource.html("<p>Platform</p>") };
+        }
+    };
+
+    var harness: TestHarness() = undefined;
+    harness.init(.{});
+    harness.runtime.options.js_window_api = true;
+    harness.runtime.options.security.navigation.allowed_origins = &.{"zero://inline"};
+    var app_state: TestApp = .{};
+    try harness.start(app_state.app());
+
+    try std.testing.expect(harness.runtime.supports(.native_views));
+
+    try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .bridge_message = .{
+        .bytes = "{\"id\":\"1\",\"command\":\"zero-native.platform.supports\",\"payload\":{\"feature\":\"native_views\"}}",
+        .origin = "zero://inline",
+        .window_id = 1,
+    } });
+    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"ok\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"result\":true") != null);
+
+    var chromium_platform = platform.NullPlatform.initWithEngine(.{}, .chromium);
+    harness.runtime.options.platform = chromium_platform.platform();
+    try std.testing.expect(!harness.runtime.supports(.tray));
+    try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .bridge_message = .{
+        .bytes = "{\"id\":\"2\",\"command\":\"zero-native.platform.supports\",\"payload\":{\"feature\":\"tray\"}}",
+        .origin = "zero://inline",
+        .window_id = 1,
+    } });
+    try std.testing.expect(std.mem.indexOf(u8, chromium_platform.lastBridgeResponse(), "\"result\":false") != null);
+
+    try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .bridge_message = .{
+        .bytes = "{\"id\":\"bad\",\"command\":\"zero-native.platform.supports\",\"payload\":{\"feature\":\"missing\"}}",
+        .origin = "zero://inline",
+        .window_id = 1,
+    } });
+    try std.testing.expect(std.mem.indexOf(u8, chromium_platform.lastBridgeResponse(), "\"invalid_request\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, chromium_platform.lastBridgeResponse(), "Platform feature is invalid") != null);
 }
 
 test "runtime dispatches native view command events" {

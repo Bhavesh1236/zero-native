@@ -244,6 +244,29 @@ export type ZeroNativeCommandSource =
   | "native_view"
   | "bridge";
 
+export type ZeroNativePlatformFeature =
+  | "main_webview"
+  | "child_webviews"
+  | "native_views"
+  | "native_control_commands"
+  | "menus"
+  | "tray"
+  | "shortcuts"
+  | "dialogs"
+  | "clipboard_text"
+  | "clipboard_rich_data"
+  | "open_url"
+  | "reveal_path"
+  | "notifications"
+  | "recent_documents"
+  | "credentials"
+  | "file_drops"
+  | "app_activation_events";
+
+export type ZeroNativePlatformFeatureSelector =
+  | { feature: ZeroNativePlatformFeature; name?: never }
+  | { feature?: never; name: ZeroNativePlatformFeature };
+
 export interface ZeroNativeCommandEvent {
   name: string;
   source: ZeroNativeCommandSource;
@@ -408,6 +431,9 @@ export interface ZeroNativeApi {
     set(options: ZeroNativeSetCredentialOptions): Promise<boolean>;
     get(options: ZeroNativeCredentialKey): Promise<string | null>;
     delete(options: ZeroNativeCredentialKey): Promise<boolean>;
+  };
+  platform: {
+    supports(value: ZeroNativePlatformFeature | ZeroNativePlatformFeatureSelector): Promise<boolean>;
   };
 }
 

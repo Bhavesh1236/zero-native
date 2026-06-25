@@ -37,6 +37,7 @@ pub const WebViewSource = platform.WebViewSource;
 pub const WebViewSourceKind = platform.WebViewSourceKind;
 pub const WebViewAssetSource = platform.WebViewAssetSource;
 pub const WebEngine = platform.WebEngine;
+pub const PlatformFeature = platform.PlatformFeature;
 pub const ViewKind = platform.ViewKind;
 pub const ViewOptions = platform.ViewOptions;
 pub const ViewPatch = platform.ViewPatch;

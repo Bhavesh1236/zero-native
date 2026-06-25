@@ -1204,6 +1204,10 @@ static NSString *ZeroNativeAppKitBridgeScript(void) {
         "get:function(value){return invoke('zero-native.credentials.get',credentialPayload(value));},"
         "delete:function(value){return invoke('zero-native.credentials.delete',credentialPayload(value));}"
         "});"
+        "function platformFeaturePayload(value){if(typeof value==='string'){return {feature:ensureString(value,'feature')};}value=value||{};return {feature:ensureString(value.feature!=null?value.feature:value.name,'feature')};}"
+        "var platform=Object.freeze({"
+        "supports:function(value){return invoke('zero-native.platform.supports',platformFeaturePayload(value));}"
+        "});"
         "function zoomPayload(options){options=options||{};validateWebViewSelector(options);return {label:options.label,windowId:options.windowId,zoom:ensureNumber(options.zoom,'zoom')};}"
         "function layerPayload(options){options=options||{};validateWebViewSelector(options);return {label:options.label,windowId:options.windowId,layer:ensureNumber(options.layer,'layer')};}"
         "var webviews=Object.freeze({"
@@ -1224,7 +1228,7 @@ static NSString *ZeroNativeAppKitBridgeScript(void) {
         "focus:function(options){options=options||{};validateViewSelector(options);return invoke('zero-native.view.focus',{label:options.label,windowId:options.windowId}).then(viewHandle);},"
         "close:function(options){options=options||{};validateViewSelector(options);return invoke('zero-native.view.close',{label:options.label,windowId:options.windowId});}"
         "});"
-        "Object.defineProperty(window,'zero',{value:Object.freeze({invoke:invoke,on:on,off:off,commands:commands,windows:windows,dialogs:dialogs,clipboard:clipboard,os:os,credentials:credentials,webviews:webviews,views:views,_complete:complete,_emit:emit}),configurable:false});"
+        "Object.defineProperty(window,'zero',{value:Object.freeze({invoke:invoke,on:on,off:off,commands:commands,windows:windows,dialogs:dialogs,clipboard:clipboard,os:os,credentials:credentials,platform:platform,webviews:webviews,views:views,_complete:complete,_emit:emit}),configurable:false});"
         "})();";
 }
 

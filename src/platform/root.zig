@@ -16,6 +16,7 @@ pub const Error = error{
     InvalidShortcut,
     InvalidMenuOptions,
     InvalidCommand,
+    InvalidPlatformFeature,
     InvalidViewOptions,
     InvalidViewWindowId,
     CrossWindowViewDenied,
@@ -60,6 +61,26 @@ pub const Error = error{
 pub const WebEngine = enum {
     system,
     chromium,
+};
+
+pub const PlatformFeature = enum {
+    main_webview,
+    child_webviews,
+    native_views,
+    native_control_commands,
+    menus,
+    tray,
+    shortcuts,
+    dialogs,
+    clipboard_text,
+    clipboard_rich_data,
+    open_url,
+    reveal_path,
+    notifications,
+    recent_documents,
+    credentials,
+    file_drops,
+    app_activation_events,
 };
 
 pub const WebViewSourceKind = enum {
@@ -888,6 +909,7 @@ pub const Platform = struct {
     name: []const u8,
     surface_value: Surface,
     run_fn: *const fn (context: *anyopaque, handler: EventHandler, handler_context: *anyopaque) anyerror!void,
+    supports_fn: ?*const fn (context: *anyopaque, feature: PlatformFeature) bool = null,
     services: PlatformServices = .{},
     app_info: AppInfo = .{},
 
@@ -898,7 +920,34 @@ pub const Platform = struct {
     pub fn run(self: Platform, handler: EventHandler, handler_context: *anyopaque) anyerror!void {
         return self.run_fn(self.context, handler, handler_context);
     }
+
+    pub fn supports(self: Platform, feature: PlatformFeature) bool {
+        if (self.supports_fn) |supports_fn| return supports_fn(self.context, feature);
+        return defaultSupportsFeature(self.services, feature);
+    }
 };
+
+fn defaultSupportsFeature(services: PlatformServices, feature: PlatformFeature) bool {
+    return switch (feature) {
+        .main_webview => services.load_window_webview_fn != null or services.load_webview_fn != null,
+        .child_webviews => services.create_webview_fn != null,
+        .native_views => services.create_view_fn != null,
+        .native_control_commands => services.create_view_fn != null,
+        .menus => services.configure_menus_fn != null,
+        .tray => services.create_tray_fn != null,
+        .shortcuts => services.configure_shortcuts_fn != null,
+        .dialogs => services.show_open_dialog_fn != null or services.show_save_dialog_fn != null or services.show_message_dialog_fn != null,
+        .clipboard_text => services.read_clipboard_fn != null and services.write_clipboard_fn != null,
+        .clipboard_rich_data => services.read_clipboard_data_fn != null and services.write_clipboard_data_fn != null,
+        .open_url => services.open_external_url_fn != null,
+        .reveal_path => services.reveal_path_fn != null,
+        .notifications => services.show_notification_fn != null,
+        .recent_documents => services.add_recent_document_fn != null or services.clear_recent_documents_fn != null,
+        .credentials => services.set_credential_fn != null and services.get_credential_fn != null and services.delete_credential_fn != null,
+        .file_drops => false,
+        .app_activation_events => false,
+    };
+}
 
 pub const Backend = enum {
     null,
@@ -992,6 +1041,7 @@ pub const NullPlatform = struct {
             .name = "null",
             .surface_value = self.surface_value,
             .run_fn = run,
+            .supports_fn = supportsFeature,
             .services = .{
                 .context = self,
                 .read_clipboard_fn = readClipboard,
@@ -1035,6 +1085,30 @@ pub const NullPlatform = struct {
                 .emit_window_event_fn = emitWindowEvent,
             },
             .app_info = self.app_info,
+        };
+    }
+
+    fn supportsFeature(context: *anyopaque, feature: PlatformFeature) bool {
+        const self: *NullPlatform = @ptrCast(@alignCast(context));
+        return switch (feature) {
+            .main_webview,
+            .child_webviews,
+            .native_views,
+            .native_control_commands,
+            .menus,
+            .shortcuts,
+            .dialogs,
+            .clipboard_text,
+            .clipboard_rich_data,
+            .open_url,
+            .reveal_path,
+            .notifications,
+            .recent_documents,
+            .credentials,
+            .file_drops,
+            .app_activation_events,
+            => true,
+            .tray => self.web_engine == .system,
         };
     }
 

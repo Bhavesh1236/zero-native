@@ -1,6 +1,6 @@
 # Builtin Commands
 
-zero-native provides built-in bridge commands for app command routing, window management, generic native views, layered WebViews, native dialogs, selected OS capabilities, and credential storage. These are controlled by the `builtin_bridge` policy in `RuntimeOptions`, separate from app-defined bridge handlers.
+zero-native provides built-in bridge commands for app command routing, window management, generic native views, layered WebViews, platform support queries, native dialogs, selected OS capabilities, and credential storage. These are controlled by the `builtin_bridge` policy in `RuntimeOptions`, separate from app-defined bridge handlers.
 
 ## Command Routing
 
@@ -24,6 +24,27 @@ zero-native provides built-in bridge commands for app command routing, window ma
 Command routing is available through `window.zero.commands.invoke(...)` when `js_window_api` is `true`. The runtime emits a `CommandEvent` with `source = .bridge`, the calling `window_id`, and the calling view label when the request comes from a named child WebView.
 
 Native controls can also bind a `command` when created with `runtime.createView(...)` or `window.zero.views.create(...)`. On macOS, Linux, and Windows system WebView builds, native button-style controls dispatch the command with the native `window_id` and the originating view label. Controls inside a toolbar report `source = .toolbar`; other native controls report `source = .native_view`.
+
+## Platform Support Commands
+
+<table>
+  <thead>
+    <tr>
+      <th>Command</th>
+      <th>Required permission</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>zero-native.platform.supports</code></td>
+      <td><code>window</code></td>
+      <td>Return whether the current platform and web engine support a feature</td>
+    </tr>
+  </tbody>
+</table>
+
+Platform support queries are available through `window.zero.platform.supports(...)` when `js_window_api` is `true`. The command accepts feature names such as `native_views`, `tray`, and `clipboard_rich_data`. Use an explicit `builtin_bridge` policy when you want per-command origin lists.
 
 ## Window commands
 
@@ -327,6 +348,7 @@ const app_permissions = [_][]const u8{
     .commands = &.{
         .{ .name = "zero-native.window.list", .permissions = .{ "window" }, .origins = .{ "zero://app" } },
         .{ .name = "zero-native.command.invoke", .permissions = .{ "window" }, .origins = .{ "zero://app" } },
+        .{ .name = "zero-native.platform.supports", .permissions = .{ "window" }, .origins = .{ "zero://app" } },
         .{ .name = "zero-native.window.create", .permissions = .{ "window" }, .origins = .{ "zero://app" } },
         .{ .name = "zero-native.view.create", .permissions = .{ "window" }, .origins = .{ "zero://app" } },
         .{ .name = "zero-native.view.list", .permissions = .{ "window" }, .origins = .{ "zero://app" } },
@@ -401,6 +423,8 @@ await window.zero.views.create({
 await toolbar.setVisible(false);
 
 await window.zero.commands.invoke("app.save");
+
+const hasNativeViews = await window.zero.platform.supports("native_views");
 
 const files = await window.zero.invoke("zero-native.dialog.openFile", {
   title: "Select a file",

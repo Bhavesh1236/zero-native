@@ -198,6 +198,7 @@ pub const MacPlatform = struct {
             .name = "macos",
             .surface_value = self.surface_value,
             .run_fn = run,
+            .supports_fn = supportsFeature,
             .services = .{
                 .context = self,
                 .read_clipboard_fn = readClipboard,
@@ -244,6 +245,31 @@ pub const MacPlatform = struct {
                 .emit_window_event_fn = emitWindowEvent,
             },
             .app_info = self.app_info,
+        };
+    }
+
+    fn supportsFeature(context: *anyopaque, feature: platform_mod.PlatformFeature) bool {
+        const self: *MacPlatform = @ptrCast(@alignCast(context));
+        return switch (feature) {
+            .main_webview,
+            .child_webviews,
+            .tray,
+            .shortcuts,
+            .dialogs,
+            .clipboard_text,
+            .clipboard_rich_data,
+            .open_url,
+            .reveal_path,
+            .notifications,
+            .recent_documents,
+            .credentials,
+            .app_activation_events,
+            => true,
+            .native_views,
+            .native_control_commands,
+            .menus,
+            .file_drops,
+            => self.web_engine == .system,
         };
     }
 

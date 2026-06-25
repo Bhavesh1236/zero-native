@@ -195,6 +195,7 @@ pub const LinuxPlatform = struct {
             .name = "linux",
             .surface_value = self.surface_value,
             .run_fn = run,
+            .supports_fn = supportsFeature,
             .services = .{
                 .context = self,
                 .read_clipboard_fn = readClipboard,
@@ -241,6 +242,31 @@ pub const LinuxPlatform = struct {
                 .emit_window_event_fn = emitWindowEvent,
             },
             .app_info = self.app_info,
+        };
+    }
+
+    fn supportsFeature(context: *anyopaque, feature: platform_mod.PlatformFeature) bool {
+        const self: *LinuxPlatform = @ptrCast(@alignCast(context));
+        return switch (feature) {
+            .main_webview,
+            .shortcuts,
+            => true,
+            .child_webviews,
+            .native_views,
+            .native_control_commands,
+            .menus,
+            .dialogs,
+            .clipboard_text,
+            .clipboard_rich_data,
+            .open_url,
+            .reveal_path,
+            .notifications,
+            .recent_documents,
+            .credentials,
+            .file_drops,
+            .app_activation_events,
+            => self.web_engine == .system,
+            .tray => false,
         };
     }
 
