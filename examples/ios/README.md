@@ -37,6 +37,7 @@ Select a simulator or device and run the `ZeroNativeIOSExample` scheme.
 - `viewDidLoad` creates and starts the zero-native app.
 - `SceneDelegate` forwards activation and resignation with `zero_native_app_activate` and `zero_native_app_deactivate`.
 - `viewDidLayoutSubviews` forwards the current WebView size and screen scale with `zero_native_app_resize`, then requests a frame.
+- Keyboard frame changes adjust the `WKWebView` bottom constraint so UIKit owns keyboard avoidance before resize/frame work reaches zero-native.
 - The native Back and Refresh buttons call `zero_native_app_command` with stable mobile command IDs, update status from `zero_native_app_last_command_count`, and request a frame.
 - Controller teardown stops and destroys the app.
 

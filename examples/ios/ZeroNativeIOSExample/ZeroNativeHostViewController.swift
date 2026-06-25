@@ -9,6 +9,7 @@ final class ZeroNativeHostViewController: UIViewController {
     private let backButton = UIButton(type: .system)
     private let refreshButton = UIButton(type: .system)
     private let webView = WKWebView(frame: .zero)
+    private var webViewBottomConstraint: NSLayoutConstraint?
     private var nativeApp: UnsafeMutableRawPointer?
 
     override func viewDidLoad() {
@@ -21,6 +22,8 @@ final class ZeroNativeHostViewController: UIViewController {
         webView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(headerView)
         view.addSubview(webView)
+        let webViewBottomConstraint = webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        self.webViewBottomConstraint = webViewBottomConstraint
         NSLayoutConstraint.activate([
             headerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -29,8 +32,10 @@ final class ZeroNativeHostViewController: UIViewController {
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             webView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            webViewBottomConstraint,
         ])
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardFrameWillChange), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide), name: UIResponder.keyboardWillHideNotification, object: nil)
 
         nativeApp = zero_native_app_create()
         if let nativeApp {
@@ -119,6 +124,29 @@ final class ZeroNativeHostViewController: UIViewController {
         zero_native_app_frame(nativeApp)
     }
 
+    @objc private func keyboardFrameWillChange(_ notification: Notification) {
+        guard let frameValue = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue else { return }
+        let keyboardFrame = view.convert(frameValue.cgRectValue, from: nil)
+        let overlap = max(0, view.bounds.maxY - keyboardFrame.minY)
+        webViewBottomConstraint?.constant = -overlap
+        animateKeyboardLayout(notification)
+    }
+
+    @objc private func keyboardWillHide(_ notification: Notification) {
+        webViewBottomConstraint?.constant = 0
+        animateKeyboardLayout(notification)
+    }
+
+    private func animateKeyboardLayout(_ notification: Notification) {
+        let userInfo = notification.userInfo ?? [:]
+        let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
+        let curve = (userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.uintValue ?? 0
+        let options = UIView.AnimationOptions(rawValue: curve << 16)
+        UIView.animate(withDuration: duration, delay: 0, options: options) {
+            self.view.layoutIfNeeded()
+        }
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         guard let nativeApp else { return }
@@ -128,6 +156,7 @@ final class ZeroNativeHostViewController: UIViewController {
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         guard let nativeApp else { return }
         zero_native_app_stop(nativeApp)
         zero_native_app_destroy(nativeApp)
