@@ -116,12 +116,16 @@ pub fn build(b: *std.Build) void {
         "zero_native_app_create",
         "zero_native_app_destroy",
         "zero_native_app_start",
+        "zero_native_app_activate",
+        "zero_native_app_deactivate",
         "zero_native_app_stop",
         "zero_native_app_resize",
         "zero_native_app_touch",
+        "zero_native_app_command",
         "zero_native_app_frame",
         "zero_native_app_set_asset_root",
         "zero_native_app_last_command_count",
+        "zero_native_app_last_command_name",
         "zero_native_app_last_error_name",
     };
     const desktop_tests = testArtifact(b, desktop_mod);
