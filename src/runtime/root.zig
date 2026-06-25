@@ -212,30 +212,14 @@ pub const Runtime = struct {
         const window = app_info.resolvedStartupWindow(0);
         if (self.findWindowIndexById(window.id) != null) return;
 
-        const runtime_index = try self.reserveWindow(window.id, window.label, window.resolvedTitle(app_info.app_name), null);
+        const runtime_index = try self.reserveWindow(window.id, window.label, window.resolvedTitle(app_info.app_name), null, true);
         self.windows[runtime_index].info.frame = window.default_frame;
         self.windows[runtime_index].main_frame = geometry.RectF.init(0, 0, window.default_frame.width, window.default_frame.height);
         self.next_window_id = @max(self.next_window_id, window.id + 1);
     }
 
     pub fn createWindow(self: *Runtime, options: platform.WindowCreateOptions) anyerror!platform.WindowInfo {
-        const source = options.source orelse self.loaded_source orelse return error.MissingWindowSource;
-        const id = if (options.id != 0) options.id else self.allocateWindowId();
-        const label = if (options.label.len > 0) options.label else return error.InvalidWindowOptions;
-        if (self.findWindowIndexById(id) != null) return error.DuplicateWindowId;
-        if (self.findWindowIndexByLabel(label) != null) return error.DuplicateWindowLabel;
-        const index = try self.reserveWindow(id, label, options.title, source);
-        var native_created = false;
-        errdefer self.removeWindowAt(index);
-        errdefer if (native_created) self.options.platform.services.closeWindow(id) catch {};
-
-        const window_options = options.windowOptions(id, self.windows[index].info.label);
-        const native_info = try self.options.platform.services.createWindow(window_options);
-        native_created = true;
-        self.applyNativeInfo(index, native_info);
-        try self.options.platform.services.loadWindowWebView(id, self.windows[index].source.?);
-        self.invalidated = true;
-        return self.windows[index].info;
+        return self.createWindowWithSourceMode(options, options.source == null);
     }
 
     pub fn listWindows(self: *const Runtime, output: []platform.WindowInfo) []const platform.WindowInfo {
@@ -271,13 +255,17 @@ pub const Runtime = struct {
     }
 
     pub fn createShellWindow(self: *Runtime, shell_window: app_manifest.ShellWindow, source: ?platform.WebViewSource) anyerror!platform.WindowInfo {
+        return self.createShellWindowWithSourceMode(shell_window, source, source == null);
+    }
+
+    fn createShellWindowWithSourceMode(self: *Runtime, shell_window: app_manifest.ShellWindow, source: ?platform.WebViewSource, source_reloads_from_app: bool) anyerror!platform.WindowInfo {
         const window_frame = geometry.RectF.init(
             shell_window.x orelse 0,
             shell_window.y orelse 0,
             shell_window.width,
             shell_window.height,
         );
-        const info = try self.createWindow(.{
+        const info = try self.createWindowWithSourceMode(.{
             .label = shell_window.label,
             .title = shell_window.title orelse "",
             .default_frame = window_frame,
@@ -285,7 +273,7 @@ pub const Runtime = struct {
             .restore_state = shell_window.restore_state,
             .restore_policy = shellRestorePolicy(shell_window.restore_policy),
             .source = source,
-        });
+        }, source_reloads_from_app);
         errdefer self.closeWindow(info.id) catch {};
 
         try self.createShellViews(info.id, shell_window.views, self.shellBoundsForWindow(info.id));
@@ -834,11 +822,12 @@ pub const Runtime = struct {
                 self.windows[runtime_index].source = try self.copySource(runtime_index, source);
                 break :blk runtime_index;
             } else blk: {
-                const runtime_index = try self.reserveWindow(window.id, window.label, window.resolvedTitle(app_info.app_name), source);
+                const runtime_index = try self.reserveWindow(window.id, window.label, window.resolvedTitle(app_info.app_name), source, true);
                 self.windows[runtime_index].info.frame = window.default_frame;
                 self.windows[runtime_index].main_frame = geometry.RectF.init(0, 0, window.default_frame.width, window.default_frame.height);
                 break :blk runtime_index;
             };
+            self.windows[runtime_index].source_reloads_from_app = true;
             if (index > 0) {
                 _ = try self.options.platform.services.createWindow(window);
             }
@@ -864,7 +853,7 @@ pub const Runtime = struct {
 
         try self.loadStartupSceneWindow(scene.windows[0], source);
         for (scene.windows[1..]) |window| {
-            _ = try self.createShellWindow(window, source);
+            _ = try self.createShellWindowWithSourceMode(window, source, true);
         }
 
         try self.log("scene.load", "loaded app scene", &.{
@@ -890,6 +879,7 @@ pub const Runtime = struct {
             shell_window.label,
             shell_window.title orelse app_info.resolvedWindowTitle(),
             null,
+            true,
         );
         if (self.findWindowIndexByLabel(shell_window.label)) |label_index| {
             if (label_index != runtime_index) return error.DuplicateWindowLabel;
@@ -899,6 +889,7 @@ pub const Runtime = struct {
         self.windows[runtime_index].info.title = try copyInto(&self.windows[runtime_index].title_storage, shell_window.title orelse app_info.resolvedWindowTitle());
         self.windows[runtime_index].info.frame = startup_frame;
         self.windows[runtime_index].source = try self.copySource(runtime_index, source);
+        self.windows[runtime_index].source_reloads_from_app = true;
         if (!self.windows[runtime_index].main_frame_set) {
             self.windows[runtime_index].main_frame = geometry.RectF.init(0, 0, startup_frame.width, startup_frame.height);
         }
@@ -936,8 +927,11 @@ pub const Runtime = struct {
             try self.options.platform.services.loadWindowWebView(1, source);
             return;
         }
-        for (self.windows[0..self.window_count]) |*window| {
-            const window_source = if (window.source) |stored| stored else source;
+        for (self.windows[0..self.window_count], 0..) |*window, index| {
+            if (window.source == null or window.source_reloads_from_app) {
+                window.source = try self.copySource(index, source);
+            }
+            const window_source = window.source orelse source;
             try self.options.platform.services.loadWindowWebView(window.info.id, window_source);
         }
     }
@@ -1067,7 +1061,27 @@ pub const Runtime = struct {
         }
     }
 
-    fn reserveWindow(self: *Runtime, id: platform.WindowId, label: []const u8, title: []const u8, source: ?platform.WebViewSource) !usize {
+    fn createWindowWithSourceMode(self: *Runtime, options: platform.WindowCreateOptions, source_reloads_from_app: bool) anyerror!platform.WindowInfo {
+        const source = options.source orelse self.loaded_source orelse return error.MissingWindowSource;
+        const id = if (options.id != 0) options.id else self.allocateWindowId();
+        const label = if (options.label.len > 0) options.label else return error.InvalidWindowOptions;
+        if (self.findWindowIndexById(id) != null) return error.DuplicateWindowId;
+        if (self.findWindowIndexByLabel(label) != null) return error.DuplicateWindowLabel;
+        const index = try self.reserveWindow(id, label, options.title, source, source_reloads_from_app);
+        var native_created = false;
+        errdefer self.removeWindowAt(index);
+        errdefer if (native_created) self.options.platform.services.closeWindow(id) catch {};
+
+        const window_options = options.windowOptions(id, self.windows[index].info.label);
+        const native_info = try self.options.platform.services.createWindow(window_options);
+        native_created = true;
+        self.applyNativeInfo(index, native_info);
+        try self.options.platform.services.loadWindowWebView(id, self.windows[index].source.?);
+        self.invalidated = true;
+        return self.windows[index].info;
+    }
+
+    fn reserveWindow(self: *Runtime, id: platform.WindowId, label: []const u8, title: []const u8, source: ?platform.WebViewSource, source_reloads_from_app: bool) !usize {
         if (self.window_count >= platform.max_windows) return error.WindowLimitReached;
         if (label.len == 0) return error.InvalidWindowOptions;
         const index = self.window_count;
@@ -1083,6 +1097,7 @@ pub const Runtime = struct {
         };
         self.windows[index].main_view_id = self.allocateViewId();
         self.windows[index].source = if (source) |source_value| try self.copySource(index, source_value) else null;
+        self.windows[index].source_reloads_from_app = source_reloads_from_app;
         self.windows[index].main_frame = geometry.RectF.init(0, 0, self.windows[index].info.frame.width, self.windows[index].info.frame.height);
         self.windows[index].main_frame_set = false;
         self.windows[index].main_layer = 0;
@@ -1124,7 +1139,7 @@ pub const Runtime = struct {
 
     fn updateWindowState(self: *Runtime, state: platform.WindowState) !void {
         const existing_index = self.findWindowIndexById(state.id);
-        const index = existing_index orelse try self.reserveWindow(state.id, state.label, state.title, null);
+        const index = existing_index orelse try self.reserveWindow(state.id, state.label, state.title, null, true);
         var info = self.windows[index].info;
         info.frame = state.frame;
         info.scale_factor = state.scale_factor;
@@ -2542,6 +2557,7 @@ const RuntimeWindow = struct {
     info: platform.WindowInfo = .{},
     main_view_id: platform.ViewId = 0,
     source: ?platform.WebViewSource = null,
+    source_reloads_from_app: bool = false,
     main_frame: geometry.RectF = geometry.RectF.init(0, 0, 0, 0),
     main_frame_set: bool = false,
     main_layer: i32 = 0,
@@ -5061,7 +5077,7 @@ test "runtime rejects oversized webview source" {
     try std.testing.expectError(error.WindowSourceTooLarge, harness.start(app_state.app()));
 }
 
-test "runtime keeps asset source fields owned for window reloads" {
+test "runtime refreshes app source and keeps reload fields owned" {
     const TestApp = struct {
         root_path: [8]u8 = "dist-one".*,
         entry: [10]u8 = "index.html".*,
@@ -5090,20 +5106,33 @@ test "runtime keeps asset source fields owned for window reloads" {
     harness.init(.{});
     var app_state: TestApp = .{};
     try harness.start(app_state.app());
+    const secondary = try harness.runtime.createWindow(.{
+        .label = "external",
+        .title = "External",
+        .source = platform.WebViewSource.url("https://example.test"),
+    });
 
     @memcpy(app_state.root_path[0..], "dist-two");
     @memcpy(app_state.entry[0..], "other.html");
     @memcpy(app_state.origin[0..], "zero://mutant");
     try harness.runtime.reloadWindows(app_state.app());
 
-    const loaded = harness.null_platform.loaded_source.?;
+    @memcpy(app_state.root_path[0..], "dist-bad");
+    @memcpy(app_state.entry[0..], "mutant.htm");
+    @memcpy(app_state.origin[0..], "zero://future");
+
+    const loaded = harness.null_platform.window_sources[0].?;
     try std.testing.expectEqual(platform.WebViewSourceKind.assets, loaded.kind);
-    try std.testing.expectEqualStrings("zero://assets", loaded.bytes);
+    try std.testing.expectEqualStrings("zero://mutant", loaded.bytes);
     const assets = loaded.asset_options.?;
-    try std.testing.expectEqualStrings("dist-one", assets.root_path);
-    try std.testing.expectEqualStrings("index.html", assets.entry);
-    try std.testing.expectEqualStrings("zero://assets", assets.origin);
+    try std.testing.expectEqualStrings("dist-two", assets.root_path);
+    try std.testing.expectEqualStrings("other.html", assets.entry);
+    try std.testing.expectEqualStrings("zero://mutant", assets.origin);
     try std.testing.expect(!assets.spa_fallback);
+
+    const secondary_source = harness.null_platform.window_sources[@intCast(secondary.id - 1)].?;
+    try std.testing.expectEqual(platform.WebViewSourceKind.url, secondary_source.kind);
+    try std.testing.expectEqualStrings("https://example.test", secondary_source.bytes);
 }
 
 test "extension registry receives runtime lifecycle and command hooks" {

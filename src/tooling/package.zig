@@ -1272,6 +1272,25 @@ fn desktopEntryEscapeAlloc(allocator: std.mem.Allocator, value: []const u8) ![]c
     return out.toOwnedSlice(allocator);
 }
 
+fn desktopExecArgumentAlloc(allocator: std.mem.Allocator, value: []const u8) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.append(allocator, '"');
+    for (value) |ch| {
+        switch (ch) {
+            0...0x1f => return error.InvalidName,
+            '"', '\\', '`', '$' => {
+                try out.append(allocator, '\\');
+                try out.append(allocator, ch);
+            },
+            '%' => try out.appendSlice(allocator, "%%"),
+            else => try out.append(allocator, ch),
+        }
+    }
+    try out.append(allocator, '"');
+    return out.toOwnedSlice(allocator);
+}
+
 fn zonStringAlloc(allocator: std.mem.Allocator, value: []const u8) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
@@ -1653,7 +1672,7 @@ fn macosAssociationRole(role: []const u8) []const u8 {
 fn linuxDesktopEntry(allocator: std.mem.Allocator, metadata: manifest_tool.Metadata) ![]const u8 {
     const display_name = try desktopEntryEscapeAlloc(allocator, metadata.displayName());
     defer allocator.free(display_name);
-    const executable = try desktopEntryEscapeAlloc(allocator, metadata.name);
+    const executable = try desktopExecArgumentAlloc(allocator, metadata.name);
     defer allocator.free(executable);
     const field_code: []const u8 = if (metadata.url_schemes.len > 0) " %U" else if (metadata.file_associations.len > 0) " %F" else "";
     const mime_line = try linuxDesktopMimeLine(allocator, metadata);
@@ -2135,7 +2154,7 @@ test "linux desktop entry contains app name" {
     const entry = try linuxDesktopEntry(std.testing.allocator, metadata);
     defer std.testing.allocator.free(entry);
     try std.testing.expect(std.mem.indexOf(u8, entry, "Name=Demo App") != null);
-    try std.testing.expect(std.mem.indexOf(u8, entry, "Exec=demo") != null);
+    try std.testing.expect(std.mem.indexOf(u8, entry, "Exec=\"demo\"") != null);
 }
 
 test "linux desktop metadata includes file associations and URL schemes" {
@@ -2155,13 +2174,30 @@ test "linux desktop metadata includes file associations and URL schemes" {
     };
     const entry = try linuxDesktopEntry(std.testing.allocator, metadata);
     defer std.testing.allocator.free(entry);
-    try std.testing.expect(std.mem.indexOf(u8, entry, "Exec=demo %U") != null);
+    try std.testing.expect(std.mem.indexOf(u8, entry, "Exec=\"demo\" %U") != null);
     try std.testing.expect(std.mem.indexOf(u8, entry, "MimeType=application/x-demo-markdown-document;x-scheme-handler/acme-notes;") != null);
 
     const mime_info = try linuxMimeInfo(std.testing.allocator, metadata);
     defer std.testing.allocator.free(mime_info);
     try std.testing.expect(std.mem.indexOf(u8, mime_info, "<mime-type type=\"application/x-demo-markdown-document\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, mime_info, "<glob pattern=\"*.md\"/>") != null);
+}
+
+test "linux desktop entry quotes executable names with spaces" {
+    const extensions = [_][]const u8{"txt"};
+    const associations = [_]manifest_tool.FileAssociationMetadata{.{
+        .name = "Text Document",
+        .extensions = &extensions,
+    }};
+    const metadata: manifest_tool.Metadata = .{
+        .id = "dev.example.spaced",
+        .name = "Example App",
+        .version = "1.2.3",
+        .file_associations = &associations,
+    };
+    const entry = try linuxDesktopEntry(std.testing.allocator, metadata);
+    defer std.testing.allocator.free(entry);
+    try std.testing.expect(std.mem.indexOf(u8, entry, "Exec=\"Example App\" %F") != null);
 }
 
 test "artifact names include metadata target and optimize mode" {
