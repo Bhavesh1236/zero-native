@@ -5,6 +5,7 @@
 #include <wincred.h>
 #include <objbase.h>
 #include <commctrl.h>
+#include <oleacc.h>
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -166,6 +167,11 @@ struct ChildWebView {
     HWND hwnd = nullptr;
     std::string label;
     std::string url;
+    std::string source;
+    int source_kind = 1;
+    std::string asset_root;
+    std::string asset_entry;
+    std::string asset_origin;
     double x = 0;
     double y = 0;
     double width = 0;
@@ -175,6 +181,7 @@ struct ChildWebView {
     uint64_t creation_order = 0;
     bool transparent = false;
     bool bridge_enabled = false;
+    bool frame_explicit = true;
 #if ZERO_NATIVE_HAS_WEBVIEW2
     ComPtr<ICoreWebView2Controller> controller;
     ComPtr<ICoreWebView2> webview;
@@ -498,6 +505,41 @@ static std::string originForUrl(const std::string &url) {
     while (host_end < url.size() && url[host_end] != '/' && url[host_end] != '?' && url[host_end] != '#') ++host_end;
     if (host_end == host_start) return url.substr(0, scheme_end) + "://local";
     return url.substr(0, host_end);
+}
+
+static std::string trimLeadingPathSeparators(std::string value) {
+    while (!value.empty() && (value.front() == '/' || value.front() == '\\')) value.erase(value.begin());
+    return value;
+}
+
+static std::string fileUrlFromPath(std::string path) {
+    if (path.empty()) return std::string();
+    std::replace(path.begin(), path.end(), '\\', '/');
+    std::string out = "file:///";
+    constexpr char hex[] = "0123456789ABCDEF";
+    for (unsigned char ch : path) {
+        if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~' || ch == '/' || ch == ':') {
+            out.push_back(static_cast<char>(ch));
+        } else {
+            out.push_back('%');
+            out.push_back(hex[(ch >> 4) & 0x0f]);
+            out.push_back(hex[ch & 0x0f]);
+        }
+    }
+    return out;
+}
+
+static std::string assetEntryUrl(const std::string &root, const std::string &entry, const std::string &origin) {
+    std::string clean_entry = trimLeadingPathSeparators(entry.empty() ? std::string("index.html") : entry);
+    if (!root.empty()) {
+        std::string path = root;
+        if (!path.empty() && path.back() != '/' && path.back() != '\\') path.push_back('\\');
+        path += clean_entry;
+        return fileUrlFromPath(path);
+    }
+    std::string base = origin.empty() ? std::string("zero://app") : origin;
+    if (!base.empty() && base.back() != '/') base.push_back('/');
+    return base + clean_entry;
 }
 
 static bool policyListMatches(const std::vector<std::string> &values, const std::string &url) {
@@ -952,6 +994,12 @@ static std::string nativeViewDisplayText(const NativeView &view) {
     return view.label;
 }
 
+static std::string nativeViewAccessibilityName(const NativeView &view) {
+    if (!view.accessibility_label.empty()) return view.accessibility_label;
+    if (!view.role.empty()) return view.role;
+    return nativeViewDisplayText(view);
+}
+
 static std::vector<std::string> segmentedLabels(const std::string &text) {
     std::vector<std::string> labels;
     const std::string source = text.empty() ? "One|Two" : text;
@@ -1022,6 +1070,20 @@ static void applyNativeViewText(NativeView &view, const std::string &text) {
     }
 }
 
+static void applyNativeViewAccessibility(NativeView &view) {
+    if (!view.hwnd) return;
+    std::wstring name = widen(nativeViewAccessibilityName(view));
+    bool uninitialize = false;
+    initializeCom(&uninitialize);
+    IAccPropServices *services = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_AccPropServices, nullptr, CLSCTX_SERVER, IID_IAccPropServices, reinterpret_cast<void **>(&services));
+    if (SUCCEEDED(hr) && services) {
+        services->SetHwndPropStr(view.hwnd, OBJID_CLIENT, CHILDID_SELF, PROPID_ACC_NAME, name.c_str());
+        services->Release();
+    }
+    finishCom(uninitialize);
+}
+
 static void applyNativeViewFrame(Host *host, NativeView &view) {
     if (!view.hwnd) return;
     POINT origin = nativeViewAbsoluteOrigin(host, view);
@@ -1033,6 +1095,7 @@ static void applyNativeViewState(NativeView &view, bool update_text, const std::
     ShowWindow(view.hwnd, view.visible ? SW_SHOW : SW_HIDE);
     EnableWindow(view.hwnd, view.enabled ? TRUE : FALSE);
     if (update_text) applyNativeViewText(view, text);
+    applyNativeViewAccessibility(view);
 }
 
 static void reorderWindowChildren(Host *host, uint64_t window_id) {
@@ -1279,6 +1342,30 @@ static RECT webViewRect(const ChildWebView &webview) {
     return rect;
 }
 
+static void applyWebViewFrame(ChildWebView &webview) {
+    if (!webview.hwnd) return;
+    MoveWindow(webview.hwnd, webViewCoord(webview.x), webViewCoord(webview.y), webViewExtent(webview.width), webViewExtent(webview.height), TRUE);
+    if (webview.controller) {
+        RECT bounds = webViewRect(webview);
+        webview.controller->put_Bounds(bounds);
+    }
+}
+
+static void loadWebViewSource(ChildWebView &webview) {
+    if (!webview.webview) return;
+    if (webview.source_kind == 0) {
+        std::wstring html = widen(webview.source);
+        webview.webview->NavigateToString(html.c_str());
+        return;
+    }
+    std::string target = webview.source_kind == 2
+        ? assetEntryUrl(webview.asset_root, webview.asset_entry, webview.asset_origin)
+        : webview.url;
+    if (target.empty()) target = "about:blank";
+    std::wstring wide_target = widen(target);
+    webview.webview->Navigate(wide_target.c_str());
+}
+
 static CreateEnvironmentFn webView2Factory() {
     static HMODULE loader = LoadLibraryW(L"WebView2Loader.dll");
     if (!loader) return nullptr;
@@ -1417,8 +1504,7 @@ static bool createChildWebView(Host *host, const std::string &key) {
                                 args->put_Cancel(TRUE);
                                 return S_OK;
                             }).Get(), &token);
-                        std::wstring latest_url = widen(found->second.url);
-                        if (!latest_url.empty()) found->second.webview->Navigate(latest_url.c_str());
+                        loadWebViewSource(found->second);
                     }
                     return S_OK;
                 }).Get());
@@ -1502,7 +1588,21 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
         case WM_SIZE:
             if (host) {
                 for (auto &entry : host->windows) {
-                    if (entry.second.hwnd == hwnd) emit(host, entry.second, kResize);
+                    if (entry.second.hwnd == hwnd) {
+#if ZERO_NATIVE_HAS_WEBVIEW2
+                        auto main = host->webviews.find(webViewKey(entry.first, "main"));
+                        if (main != host->webviews.end() && !main->second.frame_explicit) {
+                            RECT rect = {};
+                            GetClientRect(hwnd, &rect);
+                            main->second.x = 0;
+                            main->second.y = 0;
+                            main->second.width = rect.right > rect.left ? (double)(rect.right - rect.left) : entry.second.width;
+                            main->second.height = rect.bottom > rect.top ? (double)(rect.bottom - rect.top) : entry.second.height;
+                            applyWebViewFrame(main->second);
+                        }
+#endif
+                        emit(host, entry.second, kResize);
+                    }
                 }
             }
             return 0;
@@ -1585,6 +1685,7 @@ extern "C" {
 
 void zero_native_windows_load_window_webview(Host *host, uint64_t window_id, const char *source, size_t source_len, int source_kind, const char *asset_root, size_t asset_root_len, const char *asset_entry, size_t asset_entry_len, const char *asset_origin, size_t asset_origin_len, int spa_fallback);
 void zero_native_windows_bridge_respond_window(Host *host, uint64_t window_id, const char *response, size_t response_len);
+void zero_native_windows_bridge_respond_webview(Host *host, uint64_t window_id, const char *webview_label, size_t webview_label_len, const char *response, size_t response_len);
 size_t zero_native_windows_clipboard_read_data(Host *host, const char *mime_type, size_t mime_type_len, char *buffer, size_t buffer_len);
 int zero_native_windows_clipboard_write_data(Host *host, const char *mime_type, size_t mime_type_len, const char *bytes, size_t bytes_len);
 
@@ -1658,6 +1759,8 @@ void zero_native_windows_load_webview(Host *host, const char *source, size_t sou
 }
 
 void zero_native_windows_load_window_webview(Host *host, uint64_t window_id, const char *source, size_t source_len, int source_kind, const char *asset_root, size_t asset_root_len, const char *asset_entry, size_t asset_entry_len, const char *asset_origin, size_t asset_origin_len, int spa_fallback) {
+    (void)spa_fallback;
+#if !ZERO_NATIVE_HAS_WEBVIEW2
     (void)source;
     (void)source_len;
     (void)source_kind;
@@ -1667,10 +1770,69 @@ void zero_native_windows_load_window_webview(Host *host, uint64_t window_id, con
     (void)asset_entry_len;
     (void)asset_origin;
     (void)asset_origin_len;
-    (void)spa_fallback;
     if (!host) return;
     auto found = host->windows.find(window_id);
     if (found != host->windows.end()) emit(host, found->second, kWindowFrame);
+#else
+    if (!host) return;
+    auto window = host->windows.find(window_id);
+    if (window == host->windows.end() || !window->second.hwnd) return;
+
+    std::string key = webViewKey(window_id, "main");
+    auto found = host->webviews.find(key);
+    if (found == host->webviews.end()) {
+        RECT rect = {};
+        GetClientRect(window->second.hwnd, &rect);
+        HWND hwnd = CreateWindowExW(
+            0,
+            L"STATIC",
+            L"",
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+            0,
+            0,
+            rect.right > rect.left ? rect.right - rect.left : webViewExtent(window->second.width),
+            rect.bottom > rect.top ? rect.bottom - rect.top : webViewExtent(window->second.height),
+            window->second.hwnd,
+            nullptr,
+            host->instance,
+            nullptr);
+        if (!hwnd) return;
+
+        ChildWebView webview;
+        webview.window_id = window_id;
+        webview.hwnd = hwnd;
+        webview.label = "main";
+        webview.width = rect.right > rect.left ? (double)(rect.right - rect.left) : window->second.width;
+        webview.height = rect.bottom > rect.top ? (double)(rect.bottom - rect.top) : window->second.height;
+        webview.layer = 0;
+        webview.creation_order = 0;
+        webview.bridge_enabled = true;
+        webview.frame_explicit = false;
+        webview.source_kind = source_kind;
+        webview.source = slice(source, source_len);
+        webview.url = source_kind == 1 ? webview.source : std::string();
+        webview.asset_root = slice(asset_root, asset_root_len);
+        webview.asset_entry = slice(asset_entry, asset_entry_len);
+        webview.asset_origin = slice(asset_origin, asset_origin_len);
+        host->webviews[key] = webview;
+        found = host->webviews.find(key);
+        if (!createChildWebView(host, key)) {
+            DestroyWindow(hwnd);
+            host->webviews.erase(key);
+            return;
+        }
+    }
+
+    ChildWebView &webview = found->second;
+    webview.source_kind = source_kind;
+    webview.source = slice(source, source_len);
+    webview.url = source_kind == 1 ? webview.source : std::string();
+    webview.asset_root = slice(asset_root, asset_root_len);
+    webview.asset_entry = slice(asset_entry, asset_entry_len);
+    webview.asset_origin = slice(asset_origin, asset_origin_len);
+    loadWebViewSource(webview);
+    emit(host, window->second, kWindowFrame);
+#endif
 }
 
 void zero_native_windows_set_bridge_callback(Host *host, BridgeCallback callback, void *context) {
@@ -1684,10 +1846,7 @@ void zero_native_windows_bridge_respond(Host *host, const char *response, size_t
 }
 
 void zero_native_windows_bridge_respond_window(Host *host, uint64_t window_id, const char *response, size_t response_len) {
-    (void)host;
-    (void)window_id;
-    (void)response;
-    (void)response_len;
+    zero_native_windows_bridge_respond_webview(host, window_id, "main", 4, response, response_len);
 }
 
 void zero_native_windows_bridge_respond_webview(Host *host, uint64_t window_id, const char *webview_label, size_t webview_label_len, const char *response, size_t response_len) {
@@ -1983,7 +2142,7 @@ int zero_native_windows_update_view(Host *host, uint64_t window_id, const char *
 
     bool update_text = has_text || (has_role && !view.explicit_text);
     std::string display_text = has_text ? view.text : nativeViewDisplayText(view);
-    if (has_visible || has_enabled || update_text) applyNativeViewState(view, update_text, display_text);
+    if (has_visible || has_enabled || has_role || has_accessibility_label || update_text) applyNativeViewState(view, update_text, display_text);
     if (has_layer) reorderWindowChildren(host, window_id);
     return 1;
 }
@@ -2383,13 +2542,14 @@ int zero_native_windows_create_webview(Host *host, uint64_t window_id, const cha
 
 int zero_native_windows_set_webview_frame(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height) {
     if (!host || label_len == 0 || !validChildWebViewFrame(x, y, width, height)) return 0;
-    if (slice(label, label_len) == "main") return 1;
-    auto found = host->webviews.find(webViewKey(window_id, slice(label, label_len)));
+    std::string label_string = slice(label, label_len);
+    auto found = host->webviews.find(webViewKey(window_id, label_string));
     if (found == host->webviews.end() || !found->second.hwnd) return 0;
     found->second.x = x;
     found->second.y = y;
     found->second.width = width;
     found->second.height = height;
+    found->second.frame_explicit = true;
     MoveWindow(found->second.hwnd, webViewCoord(x), webViewCoord(y), webViewExtent(width), webViewExtent(height), TRUE);
 #if ZERO_NATIVE_HAS_WEBVIEW2
     if (found->second.controller) {
@@ -2413,6 +2573,7 @@ int zero_native_windows_navigate_webview(Host *host, uint64_t window_id, const c
     if (!host || label_len == 0 || url_len == 0) return 0;
     auto found = host->webviews.find(webViewKey(window_id, slice(label, label_len)));
     if (found == host->webviews.end() || !found->second.hwnd) return 0;
+    found->second.source_kind = 1;
     found->second.url = slice(url, url_len);
     if (found->second.webview) {
         std::wstring target = widen(found->second.url);
@@ -2459,7 +2620,9 @@ int zero_native_windows_set_webview_layer(Host *host, uint64_t window_id, const 
 
 int zero_native_windows_close_webview(Host *host, uint64_t window_id, const char *label, size_t label_len) {
     if (!host || label_len == 0) return 0;
-    auto found = host->webviews.find(webViewKey(window_id, slice(label, label_len)));
+    std::string label_string = slice(label, label_len);
+    if (label_string == "main") return 0;
+    auto found = host->webviews.find(webViewKey(window_id, label_string));
     if (found == host->webviews.end()) return 0;
 #if ZERO_NATIVE_HAS_WEBVIEW2
     if (found->second.controller) found->second.controller->Close();

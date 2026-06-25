@@ -448,6 +448,7 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\        app_mod.linkSystemLibrary("user32", .{});
         \\        app_mod.linkSystemLibrary("comctl32", .{});
         \\        app_mod.linkSystemLibrary("ole32", .{});
+        \\        app_mod.linkSystemLibrary("oleacc", .{});
         \\        app_mod.linkSystemLibrary("shell32", .{});
         \\        if (web_engine == .chromium) app_mod.linkSystemLibrary("libcef", .{});
         \\    }

@@ -578,7 +578,6 @@ fn createWebView(context: ?*anyopaque, options: platform_mod.WebViewOptions) any
 
 fn setWebViewFrame(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8, frame: geometry.RectF) anyerror!void {
     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
-    if (std.mem.eql(u8, label, "main")) return error.UnsupportedMainWebViewFrame;
     if (zero_native_windows_set_webview_frame(self.host, window_id, label.ptr, label.len, frame.x, frame.y, frame.width, frame.height) == 0) return error.WebViewNotFound;
 }
 
