@@ -757,9 +757,23 @@ fn extensionBody(extension: []const u8) []const u8 {
 fn validateMimeType(mime_type: []const u8) ValidationError!void {
     const slash_index = std.mem.indexOfScalar(u8, mime_type, '/') orelse return error.InvalidPath;
     if (slash_index == 0 or slash_index + 1 >= mime_type.len) return error.InvalidPath;
-    for (mime_type) |ch| {
-        if (ch == 0 or ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r') return error.InvalidPath;
+    if (std.mem.indexOfScalar(u8, mime_type[slash_index + 1 ..], '/') != null) return error.InvalidPath;
+    try validateMimeToken(mime_type[0..slash_index]);
+    try validateMimeToken(mime_type[slash_index + 1 ..]);
+}
+
+fn validateMimeToken(token: []const u8) ValidationError!void {
+    if (token.len == 0) return error.InvalidPath;
+    for (token) |ch| {
+        if (!isMimeTokenChar(ch)) return error.InvalidPath;
     }
+}
+
+fn isMimeTokenChar(ch: u8) bool {
+    return ch >= '!' and ch <= '~' and
+        ch != '(' and ch != ')' and ch != '<' and ch != '>' and ch != '@' and
+        ch != ',' and ch != ';' and ch != ':' and ch != '\\' and ch != '"' and
+        ch != '/' and ch != '[' and ch != ']' and ch != '?' and ch != '=';
 }
 
 fn validateUrlScheme(scheme: []const u8) ValidationError!void {
@@ -1351,7 +1365,7 @@ test "manifest validates native menus" {
 
 test "manifest validates file associations and URL schemes" {
     const doc_extensions = [_][]const u8{ "md", ".markdown" };
-    const doc_mime_types = [_][]const u8{"text/markdown"};
+    const doc_mime_types = [_][]const u8{ "text/markdown", "application/vnd.zero-native.note+json" };
     const file_associations = [_]FileAssociation{.{
         .name = "Markdown Document",
         .extensions = &doc_extensions,
@@ -1382,6 +1396,22 @@ test "manifest validates file associations and URL schemes" {
         .identity = .{ .id = "com.example.app", .name = "example" },
         .version = .{ .major = 1, .minor = 0, .patch = 0 },
         .file_associations = &missing_match,
+    }));
+
+    const separator_mime_types = [_][]const u8{"text/plain;x-scheme-handler/zero"};
+    const separator_mime_associations = [_]FileAssociation{.{ .name = "Bad MIME", .mime_types = &separator_mime_types }};
+    try std.testing.expectError(error.InvalidPath, validateManifest(.{
+        .identity = .{ .id = "com.example.app", .name = "example" },
+        .version = .{ .major = 1, .minor = 0, .patch = 0 },
+        .file_associations = &separator_mime_associations,
+    }));
+
+    const parameter_mime_types = [_][]const u8{"text/plain;charset=utf-8"};
+    const parameter_mime_associations = [_]FileAssociation{.{ .name = "Bad MIME Parameter", .mime_types = &parameter_mime_types }};
+    try std.testing.expectError(error.InvalidPath, validateManifest(.{
+        .identity = .{ .id = "com.example.app", .name = "example" },
+        .version = .{ .major = 1, .minor = 0, .patch = 0 },
+        .file_associations = &parameter_mime_associations,
     }));
 
     const reserved_schemes = [_]UrlScheme{.{ .scheme = "https" }};

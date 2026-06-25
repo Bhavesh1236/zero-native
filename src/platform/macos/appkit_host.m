@@ -1937,9 +1937,15 @@ static NSURL *ZeroNativeAssetEntryURL(NSString *origin, NSString *entryPath) {
         [paths addObject:url.path];
     }
     if (paths.count == 0) return NO;
-    NSString *joined = [paths componentsJoinedByString:@"\n"];
-    NSData *data = [joined dataUsingEncoding:NSUTF8StringEncoding];
-    if (!data || data.length == 0) return NO;
+    NSMutableData *data = [NSMutableData data];
+    const char separator = '\0';
+    for (NSString *path in paths) {
+        NSData *pathData = [path dataUsingEncoding:NSUTF8StringEncoding];
+        if (!pathData || pathData.length == 0) continue;
+        if (data.length > 0) [data appendBytes:&separator length:1];
+        [data appendData:pathData];
+    }
+    if (data.length == 0) return NO;
     [self emitEvent:(zero_native_appkit_event_t){
         .kind = ZERO_NATIVE_APPKIT_EVENT_FILES_DROPPED,
         .window_id = windowId,

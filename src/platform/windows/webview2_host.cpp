@@ -694,7 +694,7 @@ static std::string droppedFilePaths(HDROP drop) {
         path.resize(len);
         std::string utf8_path = narrow(path);
         if (utf8_path.empty()) continue;
-        if (!paths.empty()) paths.push_back('\n');
+        if (!paths.empty()) paths.push_back('\0');
         paths += utf8_path;
     }
     return paths;

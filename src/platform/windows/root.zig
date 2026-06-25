@@ -319,10 +319,14 @@ fn windowsCallback(context: ?*anyopaque, event: *const WindowsEvent) callconv(.c
         .shutdown => state.emit(.app_shutdown),
         .app_activated => state.emit(.app_activated),
         .app_deactivated => state.emit(.app_deactivated),
-        .files_dropped => state.emit(.{ .files_dropped = .{
-            .window_id = event.window_id,
-            .paths = event.drop_paths[0..event.drop_paths_len],
-        } }),
+        .files_dropped => {
+            var paths_buffer: [platform_mod.max_drop_paths][]const u8 = undefined;
+            const paths = platform_mod.splitDropPaths(event.drop_paths[0..event.drop_paths_len], paths_buffer[0..]);
+            state.emit(.{ .files_dropped = .{
+                .window_id = event.window_id,
+                .paths = paths,
+            } });
+        },
         .resize => {
             const surface: platform_mod.Surface = .{
                 .id = event.window_id,

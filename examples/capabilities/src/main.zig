@@ -71,7 +71,7 @@ const CapabilitiesApp = struct {
     drop_count: u32 = 0,
     activation_count: u32 = 0,
     deactivation_count: u32 = 0,
-    last_drop_paths: []const u8 = "",
+    last_drop_paths: []const []const u8 = &.{},
 
     fn app(self: *@This()) zero_native.App {
         return .{
@@ -95,7 +95,8 @@ const CapabilitiesApp = struct {
                 self.drop_count += 1;
                 self.last_drop_paths = drop.paths;
                 var status_buffer: [160]u8 = undefined;
-                const status = try std.fmt.bufPrint(&status_buffer, "Received file drop {d}: {s}", .{ self.drop_count, drop.paths });
+                const first_path = if (drop.paths.len > 0) drop.paths[0] else "";
+                const status = try std.fmt.bufPrint(&status_buffer, "Received file drop {d}: {d} file(s): {s}", .{ self.drop_count, drop.paths.len, first_path });
                 _ = try runtime.updateView(drop.window_id, "status-label", .{ .text = status });
             },
             .lifecycle => |lifecycle| switch (lifecycle) {
@@ -193,12 +194,15 @@ test "capabilities bridge gates native services and dispatches file drops" {
     try dispatchBridge(&harness, app, "{\"id\":\"delete\",\"command\":\"zero-native.credentials.delete\",\"payload\":{\"service\":\"dev.zero-native.capabilities\",\"account\":\"demo\"}}");
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"result\":true") != null);
 
+    const dropped_paths = [_][]const u8{ "/tmp/one\nname.txt", "/tmp/two.txt" };
     try harness.runtime.dispatchPlatformEvent(app, .{ .files_dropped = .{
         .window_id = 1,
-        .paths = "/tmp/one.txt\n/tmp/two.txt",
+        .paths = &dropped_paths,
     } });
     try std.testing.expectEqual(@as(u32, 1), app_state.drop_count);
-    try std.testing.expectEqualStrings("/tmp/one.txt\n/tmp/two.txt", app_state.last_drop_paths);
+    try std.testing.expectEqual(@as(usize, 2), app_state.last_drop_paths.len);
+    try std.testing.expectEqualStrings("/tmp/one\nname.txt", app_state.last_drop_paths[0]);
+    try std.testing.expectEqualStrings("/tmp/two.txt", app_state.last_drop_paths[1]);
     try std.testing.expectEqualStrings("drop:files", harness.null_platform.lastWindowEventName());
 
     try harness.runtime.dispatchPlatformEvent(app, .app_activated);

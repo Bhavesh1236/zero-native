@@ -1343,20 +1343,9 @@ pub const Runtime = struct {
         var buffer: [platform.max_window_event_detail_bytes]u8 = undefined;
         var writer = std.Io.Writer.fixed(&buffer);
         try writer.print("{{\"windowId\":{d},\"paths\":[", .{drop.window_id});
-        var wrote_any = false;
-        var start: usize = 0;
-        for (drop.paths, 0..) |ch, index| {
-            if (ch != '\n') continue;
-            if (index > start) {
-                if (wrote_any) try writer.writeByte(',');
-                try json.writeString(&writer, drop.paths[start..index]);
-                wrote_any = true;
-            }
-            start = index + 1;
-        }
-        if (start < drop.paths.len) {
-            if (wrote_any) try writer.writeByte(',');
-            try json.writeString(&writer, drop.paths[start..]);
+        for (drop.paths, 0..) |path, index| {
+            if (index > 0) try writer.writeByte(',');
+            try json.writeString(&writer, path);
         }
         try writer.writeAll("]}");
         try self.emitWindowEvent(drop.window_id, "drop:files", writer.buffered());
@@ -5872,7 +5861,7 @@ test "runtime dispatches file drop events to app and window bridge" {
     const TestApp = struct {
         drop_count: u32 = 0,
         last_window_id: platform.WindowId = 0,
-        last_paths: []const u8 = "",
+        last_paths: []const []const u8 = &.{},
 
         fn app(self: *@This()) App {
             return .{ .context = self, .name = "file-drop", .source = platform.WebViewSource.html("<p>Drops</p>"), .event_fn = event };
@@ -5897,16 +5886,19 @@ test "runtime dispatches file drop events to app and window bridge" {
     var app_state: TestApp = .{};
     try harness.start(app_state.app());
 
+    const dropped_paths = [_][]const u8{ "/tmp/one\nname.txt", "/tmp/two.txt" };
     try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .files_dropped = .{
         .window_id = 1,
-        .paths = "/tmp/one.txt\n/tmp/two.txt",
+        .paths = &dropped_paths,
     } });
 
     try std.testing.expectEqual(@as(u32, 1), app_state.drop_count);
     try std.testing.expectEqual(@as(platform.WindowId, 1), app_state.last_window_id);
-    try std.testing.expectEqualStrings("/tmp/one.txt\n/tmp/two.txt", app_state.last_paths);
+    try std.testing.expectEqual(@as(usize, 2), app_state.last_paths.len);
+    try std.testing.expectEqualStrings("/tmp/one\nname.txt", app_state.last_paths[0]);
+    try std.testing.expectEqualStrings("/tmp/two.txt", app_state.last_paths[1]);
     try std.testing.expectEqualStrings("drop:files", harness.null_platform.lastWindowEventName());
-    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastWindowEventDetail(), "\"paths\":[\"/tmp/one.txt\",\"/tmp/two.txt\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastWindowEventDetail(), "\"paths\":[\"/tmp/one\\nname.txt\",\"/tmp/two.txt\"]") != null);
 }
 
 test "runtime handles built-in JavaScript webview bridge commands" {

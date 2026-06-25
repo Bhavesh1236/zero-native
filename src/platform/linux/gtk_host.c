@@ -921,7 +921,7 @@ static void zero_native_append_file_path(GString *paths, GFile *file) {
         g_free(path);
         return;
     }
-    if (paths->len > 0) g_string_append_c(paths, '\n');
+    if (paths->len > 0) g_string_append_c(paths, '\0');
     g_string_append(paths, path);
     g_free(path);
 }

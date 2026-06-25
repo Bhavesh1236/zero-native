@@ -361,10 +361,14 @@ fn appkitCallback(context: ?*anyopaque, event: *const AppKitEvent) callconv(.c) 
             .name = event.command_name[0..event.command_name_len],
             .window_id = event.window_id,
         } }),
-        .files_dropped => state.emit(.{ .files_dropped = .{
-            .window_id = event.window_id,
-            .paths = event.drop_paths[0..event.drop_paths_len],
-        } }),
+        .files_dropped => {
+            var paths_buffer: [platform_mod.max_drop_paths][]const u8 = undefined;
+            const paths = platform_mod.splitDropPaths(event.drop_paths[0..event.drop_paths_len], paths_buffer[0..]);
+            state.emit(.{ .files_dropped = .{
+                .window_id = event.window_id,
+                .paths = paths,
+            } });
+        },
     }
 }
 

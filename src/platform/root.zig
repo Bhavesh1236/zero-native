@@ -144,6 +144,7 @@ pub const max_tray_tooltip_bytes: usize = 256;
 pub const max_tray_item_label_bytes: usize = 256;
 pub const max_tray_item_command_bytes: usize = 128;
 pub const max_drop_paths_bytes: usize = 8192;
+pub const max_drop_paths: usize = max_drop_paths_bytes / 2 + 1;
 pub const max_window_event_name_bytes: usize = 64;
 pub const max_window_event_detail_bytes: usize = 8192;
 pub const max_views: usize = 32;
@@ -603,7 +604,7 @@ pub const MenuCommandEvent = struct {
 
 pub const FileDropEvent = struct {
     window_id: WindowId = 1,
-    paths: []const u8 = "",
+    paths: []const []const u8 = &.{},
 };
 
 pub const ClipboardData = struct {
@@ -646,6 +647,24 @@ pub const Event = union(enum) {
         };
     }
 };
+
+pub fn splitDropPaths(bytes: []const u8, output: [] []const u8) []const []const u8 {
+    var count: usize = 0;
+    var start: usize = 0;
+    for (bytes, 0..) |ch, index| {
+        if (ch != 0) continue;
+        if (index > start and count < output.len) {
+            output[count] = bytes[start..index];
+            count += 1;
+        }
+        start = index + 1;
+    }
+    if (start < bytes.len and count < output.len) {
+        output[count] = bytes[start..];
+        count += 1;
+    }
+    return output[0..count];
+}
 
 pub const EventHandler = *const fn (context: *anyopaque, event: Event) anyerror!void;
 
@@ -2211,6 +2230,15 @@ test "webview asset source records production bundle options" {
     try std.testing.expectEqualStrings("zero://app", source.bytes);
     try std.testing.expectEqualStrings("dist", source.asset_options.?.root_path);
     try std.testing.expect(source.asset_options.?.spa_fallback);
+}
+
+test "file drop path splitter preserves embedded newlines" {
+    var output: [max_drop_paths][]const u8 = undefined;
+    const paths = splitDropPaths("/tmp/one\nname.txt\x00/tmp/two.txt", output[0..]);
+
+    try std.testing.expectEqual(@as(usize, 2), paths.len);
+    try std.testing.expectEqualStrings("/tmp/one\nname.txt", paths[0]);
+    try std.testing.expectEqualStrings("/tmp/two.txt", paths[1]);
 }
 
 test {
