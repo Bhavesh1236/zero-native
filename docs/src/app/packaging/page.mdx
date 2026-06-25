@@ -1,6 +1,6 @@
 # Packaging
 
-zero-native provides tooling to bundle your app into distributable packages for macOS, Linux, and Windows. Chromium packages include the platform-specific CEF runtime when `.web_engine = "chromium"` and the matching CEF layout is installed.
+zero-native provides tooling to bundle your app into distributable packages for macOS, Linux, and Windows. Chromium packaging is currently supported for macOS and includes the CEF runtime when `.web_engine = "chromium"` and the matching CEF layout is installed.
 
 ## Quick start
 
@@ -40,7 +40,7 @@ The build system exposes options that control platform, web engine, and build fe
       <td><code>-Dweb-engine</code></td>
       <td><code>system</code>, <code>chromium</code></td>
       <td><code>app.zon</code></td>
-      <td>Temporary WebView engine override</td>
+      <td>Temporary WebView engine override; Chromium is currently macOS-only</td>
     </tr>
     <tr>
       <td><code>-Dcef-dir</code></td>
@@ -218,13 +218,13 @@ This copies the configured `dist` directory into the build output. Production pa
 
 ## CEF bundling
 
-When using the Chromium engine, bundle CEF alongside the app:
+When using the Chromium engine on macOS, bundle CEF alongside the app:
 
 ```bash
 zig build cef-bundle -Dcef-dir=/path/to/cef
 ```
 
-This copies the required CEF framework, libraries, and resources into the app bundle. The CEF distribution must match the target platform and architecture.
+This copies the required CEF framework, libraries, and resources into the app bundle. The CEF distribution must match the macOS target architecture.
 
 Use the same CEF version for install, build, package, and CI verification. The usual app-developer flow is:
 

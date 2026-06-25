@@ -22,15 +22,44 @@ fn event(context: *anyopaque, runtime: *zero_native.Runtime, event_value: zero_n
 
 `CommandEvent.source` identifies where the action came from:
 
-| Source | Emitted by |
-| --- | --- |
-| `.runtime` | Direct `runtime.dispatchCommand(...)` calls |
-| `.menu` | Native menu items |
-| `.shortcut` | Native keyboard shortcuts |
-| `.toolbar` | Native controls inside a toolbar view |
-| `.tray` | Tray actions |
-| `.native_view` | Native controls outside toolbar views |
-| `.bridge` | `window.zero.commands.invoke(...)` |
+<table>
+  <thead>
+    <tr>
+      <th>Source</th>
+      <th>Emitted by</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>.runtime</code></td>
+      <td>Direct <code>runtime.dispatchCommand(...)</code> calls</td>
+    </tr>
+    <tr>
+      <td><code>.menu</code></td>
+      <td>Native menu items</td>
+    </tr>
+    <tr>
+      <td><code>.shortcut</code></td>
+      <td>Native keyboard shortcuts</td>
+    </tr>
+    <tr>
+      <td><code>.toolbar</code></td>
+      <td>Native controls inside a toolbar view</td>
+    </tr>
+    <tr>
+      <td><code>.tray</code></td>
+      <td>Tray actions</td>
+    </tr>
+    <tr>
+      <td><code>.native_view</code></td>
+      <td>Native controls outside toolbar views</td>
+    </tr>
+    <tr>
+      <td><code>.bridge</code></td>
+      <td><code>window.zero.commands.invoke(...)</code></td>
+    </tr>
+  </tbody>
+</table>
 
 Use `command.name` for the action and `command.source` only when the app genuinely needs source-specific behavior. Tray commands also include `tray_item_id` for apps that still need to distinguish legacy tray items that dispatch `"tray.action"`.
 

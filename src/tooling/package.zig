@@ -79,6 +79,7 @@ pub fn artifactName(buffer: []u8, metadata: manifest_tool.Metadata, target: Pack
 }
 
 pub fn createPackage(allocator: std.mem.Allocator, io: std.Io, options: PackageOptions) !PackageStats {
+    try validateWebEngineTarget(options.target, options.web_engine);
     var stats = switch (options.target) {
         .macos => try createMacosApp(allocator, io, options),
         .windows, .linux => try createDesktopArtifact(allocator, io, options),
@@ -92,6 +93,10 @@ pub fn createPackage(allocator: std.mem.Allocator, io: std.Io, options: PackageO
         }
     }
     return stats;
+}
+
+fn validateWebEngineTarget(target: PackageTarget, web_engine: WebEngine) !void {
+    if (web_engine == .chromium and target != .macos) return error.UnsupportedWebEngine;
 }
 
 pub fn printDiagnostic(stats: PackageStats) void {
@@ -2231,14 +2236,14 @@ test "macOS app executable is marked executable" {
     try std.testing.expect((permissions.toMode() & 0o111) != 0);
 }
 
-test "chromium desktop packages require a matching CEF layout" {
+test "non-macos chromium packages are rejected before CEF layout checks" {
     const metadata: manifest_tool.Metadata = .{
         .id = "dev.demo",
         .name = "demo",
         .version = "0.1.0",
     };
 
-    try std.testing.expectError(error.MissingLayout, createPackage(std.testing.allocator, std.testing.io, .{
+    try std.testing.expectError(error.UnsupportedWebEngine, createPackage(std.testing.allocator, std.testing.io, .{
         .metadata = metadata,
         .target = .linux,
         .output_path = ".zig-cache/test-package-linux-chromium",

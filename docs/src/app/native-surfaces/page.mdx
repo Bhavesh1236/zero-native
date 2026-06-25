@@ -4,13 +4,42 @@ Native surfaces are the app-owned regions that zero-native composes inside a pla
 
 ## Surface Types
 
-| Surface | Use it for | Backed by |
-| --- | --- | --- |
-| WebView | Rich product UI, frontend frameworks, documents, dashboards | `ViewKind.webview`, `WebViewSource`, and the selected web engine |
-| Native chrome | Toolbars, titlebar accessories, sidebars, status bars | Native platform views declared through `ShellView` or `runtime.createView(...)` |
-| Native controls | Buttons, search fields, toggles, segmented controls, labels, progress | Platform controls with command routing and accessibility metadata |
-| OS capability surfaces | Dialogs, tray, clipboard, notifications, credentials, file drops | Guarded `PlatformServices`, runtime methods, and built-in bridge commands |
-| GPU surface | Future custom drawing regions for editors, timelines, games, or canvas-like workflows | Reserved as `ViewKind.gpu_surface`; current hosts report it unsupported |
+<table>
+  <thead>
+    <tr>
+      <th>Surface</th>
+      <th>Use it for</th>
+      <th>Backed by</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>WebView</td>
+      <td>Rich product UI, frontend frameworks, documents, dashboards</td>
+      <td><code>ViewKind.webview</code>, <code>WebViewSource</code>, and the selected web engine</td>
+    </tr>
+    <tr>
+      <td>Native chrome</td>
+      <td>Toolbars, titlebar accessories, sidebars, status bars</td>
+      <td>Native platform views declared through <code>ShellView</code> or <code>runtime.createView(...)</code></td>
+    </tr>
+    <tr>
+      <td>Native controls</td>
+      <td>Buttons, search fields, toggles, segmented controls, labels, progress</td>
+      <td>Platform controls with command routing and accessibility metadata</td>
+    </tr>
+    <tr>
+      <td>OS capability surfaces</td>
+      <td>Dialogs, tray, clipboard, notifications, credentials, file drops</td>
+      <td>Guarded <code>PlatformServices</code>, runtime methods, and built-in bridge commands</td>
+    </tr>
+    <tr>
+      <td>GPU surface</td>
+      <td>Future custom drawing regions for editors, timelines, games, or canvas-like workflows</td>
+      <td>Reserved as <code>ViewKind.gpu_surface</code>; current hosts report it unsupported</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Window Shape
 

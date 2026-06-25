@@ -79,8 +79,8 @@ pub fn build(b: *std.Build) void {
     if (selected_platform == .windows and target.result.os.tag != .windows) {
         @panic("-Dplatform=windows requires a Windows target");
     }
-    if (web_engine == .chromium and selected_platform == .null) {
-        @panic("-Dweb-engine=chromium requires -Dplatform=macos, linux, or windows");
+    if (web_engine == .chromium and selected_platform != .macos) {
+        @panic("-Dweb-engine=chromium currently requires -Dplatform=macos");
     }
 
     const geometry_mod = module(b, target, optimize, "src/primitives/geometry/root.zig");

@@ -4,24 +4,148 @@ zero-native exposes one runtime model across desktop hosts, but native affordanc
 
 ## Desktop Hosts
 
-| Area | macOS system WebView | macOS Chromium | Linux system WebView | Linux Chromium | Windows system WebView |
-| --- | --- | --- | --- | --- | --- |
-| Main WebView | Supported | Supported | Supported | Supported | Supported |
-| Child WebViews | Supported | Supported | Supported | Unsupported | Supported |
-| Native views | Supported | Unsupported | Supported | Unsupported | Supported |
-| Native control commands | Supported | Unsupported | Supported | Unsupported | Supported |
-| App menus | Supported | Unsupported | Supported | Unsupported | Supported |
-| System tray | Supported | Supported | Unsupported | Unsupported | Supported |
-| Keyboard shortcuts | Supported | Supported | Supported | Supported | Supported |
-| Dialogs | Supported | Supported | Supported | Unsupported | Supported |
-| Clipboard text | Supported | Supported | Supported | Unsupported | Supported |
-| Clipboard rich data | Supported | Supported | Supported | Unsupported | Supported |
-| Open URL / reveal path | Supported | Supported | Supported | Unsupported | Supported |
-| Notifications | Supported | Supported | Supported | Unsupported | Supported |
-| Recent documents | Supported | Supported | Supported | Unsupported | Supported |
-| Credentials | Supported | Supported | Supported | Unsupported | Supported |
-| File drops | Supported | Unsupported | Supported | Unsupported | Supported |
-| App activation events | Supported | Supported | Supported | Unsupported | Supported |
+<table>
+  <thead>
+    <tr>
+      <th>Area</th>
+      <th>macOS system WebView</th>
+      <th>macOS Chromium</th>
+      <th>Linux system WebView</th>
+      <th>Linux Chromium</th>
+      <th>Windows system WebView</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Main WebView</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>Child WebViews</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>Native views</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>Native control commands</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>App menus</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>System tray</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>Keyboard shortcuts</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>Dialogs</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>Clipboard text</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>Clipboard rich data</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>Open URL / reveal path</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>Notifications</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>Recent documents</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>Credentials</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>File drops</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>App activation events</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Supported</td>
+      <td>Unsupported</td>
+      <td>Supported</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Runtime Queries
 
@@ -50,20 +174,63 @@ The macOS, Linux, and Windows system-WebView hosts support `toolbar`, `titlebar_
 
 `ViewKind.webview` is the compatibility path for WebView-backed views. Existing `runtime.createWebView(...)` and `window.zero.webviews.*` APIs remain available.
 
+Chromium builds are currently enabled on macOS only. Linux and Windows Chromium host files are placeholders and build/package tooling rejects those targets until the native hosts are implemented.
+
 ## Mobile And GPU
 
 iOS and Android are supported today through embedded host examples rather than the desktop platform host matrix. The mobile examples own native header/navigation layout in UIKit or Android views, embed a `WKWebView` or Android `WebView` as the workspace, and drive zero-native through the C/JNI lifecycle, activation, resize, and command calls documented in [Embedded App](/embed).
 
-| Area | iOS embedded host | Android embedded host |
-| --- | --- | --- |
-| Native header/navigation | UIKit header with Back and Refresh command buttons | Android view header with Back and Refresh command buttons |
-| WebView content area | `WKWebView` workspace | Android `WebView` workspace |
-| Runtime lifecycle | `zero_native_app_create`, `start`, `activate`, `deactivate`, `stop`, and `destroy` from Swift | JNI bridge for `create`, `start`, `activate`, `deactivate`, `stop`, and `destroy` |
-| Resize and orientation | `viewDidLayoutSubviews` forwards WebView size and screen scale | Orientation/screen-size changes stay in the activity; `surfaceChanged` forwards size, density, and `Surface` |
-| Keyboard avoidance | Keyboard frame notifications adjust the WebView bottom constraint | `windowSoftInputMode="adjustResize"` lets Android relayout the content area |
-| Back/navigation command | Native Back button dispatches `mobile.back` | Native Back button and system Back dispatch `mobile.back` |
-| Touch forwarding | UIKit/WebKit own touch handling for the WebView workspace | `MotionEvent` pointer data is forwarded through `zero_native_app_touch` |
-| Generic `ShellView` mapping | Mobile shell metadata feeds generated UIKit host config for header labels, command buttons, and WebView workspace | Mobile shell metadata feeds generated Android host config for header labels, command buttons, and WebView workspace |
+<table>
+  <thead>
+    <tr>
+      <th>Area</th>
+      <th>iOS embedded host</th>
+      <th>Android embedded host</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Native header/navigation</td>
+      <td>UIKit header with Back and Refresh command buttons</td>
+      <td>Android view header with Back and Refresh command buttons</td>
+    </tr>
+    <tr>
+      <td>WebView content area</td>
+      <td><code>WKWebView</code> workspace</td>
+      <td>Android <code>WebView</code> workspace</td>
+    </tr>
+    <tr>
+      <td>Runtime lifecycle</td>
+      <td><code>zero_native_app_create</code>, <code>start</code>, <code>activate</code>, <code>deactivate</code>, <code>stop</code>, and <code>destroy</code> from Swift</td>
+      <td>JNI bridge for <code>create</code>, <code>start</code>, <code>activate</code>, <code>deactivate</code>, <code>stop</code>, and <code>destroy</code></td>
+    </tr>
+    <tr>
+      <td>Resize and orientation</td>
+      <td><code>viewDidLayoutSubviews</code> forwards WebView size and screen scale</td>
+      <td>Orientation/screen-size changes stay in the activity; <code>surfaceChanged</code> forwards size, density, and <code>Surface</code></td>
+    </tr>
+    <tr>
+      <td>Keyboard avoidance</td>
+      <td>Keyboard frame notifications adjust the WebView bottom constraint</td>
+      <td><code>windowSoftInputMode="adjustResize"</code> lets Android relayout the content area</td>
+    </tr>
+    <tr>
+      <td>Back/navigation command</td>
+      <td>Native Back button dispatches <code>mobile.back</code></td>
+      <td>Native Back button and system Back dispatch <code>mobile.back</code></td>
+    </tr>
+    <tr>
+      <td>Touch forwarding</td>
+      <td>UIKit/WebKit own touch handling for the WebView workspace</td>
+      <td><code>MotionEvent</code> pointer data is forwarded through <code>zero_native_app_touch</code></td>
+    </tr>
+    <tr>
+      <td>Generic <code>ShellView</code> mapping</td>
+      <td>Mobile shell metadata feeds generated UIKit host config for header labels, command buttons, and WebView workspace</td>
+      <td>Mobile shell metadata feeds generated Android host config for header labels, command buttons, and WebView workspace</td>
+    </tr>
+  </tbody>
+</table>
 
 Mobile hosts own safe areas, orientation, keyboard avoidance, back gestures, and platform lifecycle integration. The current mobile mapping is package-time shell metadata for native header/workspace structure; dynamic generic native view bridge commands should still be treated as desktop APIs until UIKit and Android runtime view mutation is added.
 

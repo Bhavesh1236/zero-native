@@ -249,12 +249,11 @@ pub const LinuxPlatform = struct {
         const self: *LinuxPlatform = @ptrCast(@alignCast(context));
         return switch (feature) {
             .main_webview,
-            .shortcuts,
-            => true,
             .child_webviews,
             .native_views,
             .native_control_commands,
             .menus,
+            .shortcuts,
             .dialogs,
             .clipboard_text,
             .clipboard_rich_data,
@@ -942,7 +941,7 @@ test "linux supports native container and control kinds" {
     try std.testing.expect(!isSupportedNativeViewKind(.gpu_surface));
 }
 
-test "linux chromium reports unsupported native surfaces" {
+test "linux chromium reports unsupported desktop features" {
     var system = testPlatformWithEngine(.system);
     try std.testing.expect(LinuxPlatform.supportsFeature(&system, .main_webview));
     try std.testing.expect(LinuxPlatform.supportsFeature(&system, .child_webviews));
@@ -951,8 +950,8 @@ test "linux chromium reports unsupported native surfaces" {
     try std.testing.expect(LinuxPlatform.supportsFeature(&system, .menus));
 
     var chromium = testPlatformWithEngine(.chromium);
-    try std.testing.expect(LinuxPlatform.supportsFeature(&chromium, .main_webview));
-    try std.testing.expect(LinuxPlatform.supportsFeature(&chromium, .shortcuts));
+    try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .main_webview));
+    try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .shortcuts));
     try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .child_webviews));
     try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .native_views));
     try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .native_control_commands));

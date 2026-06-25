@@ -44,8 +44,8 @@ pub fn build(b: *std.Build) void {
     const web_engine = web_engine_override orelse WebEngineOption.system;
     const cef_dir = cef_dir_override orelse defaultCefDir(selected_platform, "third_party/cef/macos");
     const cef_auto_install = cef_auto_install_override orelse false;
-    if (web_engine == .chromium and selected_platform == .null) {
-        @panic("-Dweb-engine=chromium requires -Dplatform=macos, linux, or windows");
+    if (web_engine == .chromium and selected_platform != .macos) {
+        @panic("-Dweb-engine=chromium currently requires -Dplatform=macos");
     }
 
     const zero_native_mod = zeroNativeModule(b, target, optimize, zero_native_path);

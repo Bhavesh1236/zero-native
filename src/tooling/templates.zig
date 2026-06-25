@@ -199,8 +199,8 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\    const web_engine = web_engine_override orelse app_web_engine.web_engine;
         \\    const cef_dir = cef_dir_override orelse defaultCefDir(selected_platform, app_web_engine.cef_dir);
         \\    const cef_auto_install = cef_auto_install_override orelse app_web_engine.cef_auto_install;
-        \\    if (web_engine == .chromium and selected_platform == .@"null") {
-        \\        @panic("-Dweb-engine=chromium requires -Dplatform=macos, linux, or windows");
+        \\    if (web_engine == .chromium and selected_platform != .macos) {
+        \\        @panic("-Dweb-engine=chromium currently requires -Dplatform=macos");
         \\    }
         \\
         \\    const zero_native_mod = zeroNativeModule(b, target, optimize, zero_native_path);
