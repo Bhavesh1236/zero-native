@@ -5,7 +5,7 @@
     .version = "0.1.0",
     .icons = .{ "assets/icon.icns" },
     .platforms = .{ "macos", "linux" },
-    .permissions = .{ "window" },
+    .permissions = .{ "command", "view" },
     .capabilities = .{ "webview", "js_bridge" },
     .shortcuts = .{
         .{ .id = "app.refresh", .key = "r", .modifiers = .{ "primary" } },

@@ -5,7 +5,7 @@
     .version = "0.1.0",
     .icons = .{ "assets/icon.icns" },
     .platforms = .{ "macos", "linux" },
-    .permissions = .{ "notifications", "clipboard", "credentials" },
+    .permissions = .{ "notifications", "dialog", "clipboard", "credentials" },
     .capabilities = .{ "webview", "js_bridge", "notifications", "clipboard", "credentials" },
     .shell = .{
         .windows = .{
