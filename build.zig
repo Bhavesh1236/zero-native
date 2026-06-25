@@ -302,6 +302,55 @@ pub fn build(b: *std.Build) void {
     webview_smoke_run.step.dependOn(&cli_exe.step);
     webview_smoke_step.dependOn(&webview_smoke_run.step);
 
+    const native_shell_smoke_step = b.step("test-native-shell-smoke", "Run macOS native-shell automation smoke test");
+    const native_shell_smoke_build = b.addSystemCommand(&.{ "zig", "build", "-Dplatform=macos", "-Dweb-engine=system", "-Dautomation=true", "-Djs-bridge=true" });
+    native_shell_smoke_build.setCwd(b.path("examples/native-shell"));
+    const native_shell_smoke_run = b.addSystemCommand(&.{
+        "sh", "-c",
+        \\set -eu
+        \\cd examples/native-shell
+        \\app="zig-out/bin/native-shell"
+        \\cli="$1"
+        \\case "$cli" in /*) ;; *) cli="../../$cli" ;; esac
+        \\automation_dir=".zig-cache/zero-native-automation"
+        \\response_file="$automation_dir/bridge-response.txt"
+        \\mkdir -p "$automation_dir"
+        \\rm -f "$automation_dir/snapshot.txt" "$automation_dir/accessibility.txt" "$automation_dir/windows.txt" "$automation_dir/command.txt" "$response_file"
+        \\"$app" > .zig-cache/zero-native-native-shell-smoke.log 2>&1 &
+        \\pid=$!
+        \\trap 'kill "$pid" >/dev/null 2>&1 || true; wait "$pid" >/dev/null 2>&1 || true' EXIT
+        \\ready="$("$cli" automate wait 2>&1)"
+        \\case "$ready" in *"ready=true"*) ;; *) echo "native-shell automation snapshot was not ready" >&2; exit 1 ;; esac
+        \\snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\case "$snapshot" in *'window @w1 "zero-native Native Shell"'*) ;; *) echo "native-shell window was missing from snapshot" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/toolbar kind=toolbar'*) ;; *) echo "toolbar view was missing from snapshot" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/sidebar kind=sidebar'*) ;; *) echo "sidebar view was missing from snapshot" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/main kind=webview'*) ;; *) echo "main WebView was missing from snapshot" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/statusbar kind=statusbar'*) ;; *) echo "statusbar view was missing from snapshot" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/refresh-icon kind=icon_button'*'accessibility_label="Refresh workspace"'*) ;; *) echo "refresh icon accessibility metadata was missing from snapshot" >&2; exit 1 ;; esac
+        \\rm -f "$response_file"
+        \\printf 'bridge %s\n' '{"id":"native-shell-refresh","command":"zero-native.command.invoke","payload":{"name":"app.refresh"}}' > "$automation_dir/command.txt"
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ] && [ ! -s "$response_file" ]; do attempts=$((attempts + 1)); sleep 0.1; done
+        \\response="$(cat "$response_file" 2>/dev/null || true)"
+        \\case "$response" in *'"ok":true'*'"name":"app.refresh"'*'"source":"bridge"'*) ;; *) echo "native-shell command bridge did not succeed: $response" >&2; exit 1 ;; esac
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  case "$snapshot" in *'Refreshed from bridge. Count 1.'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$snapshot" in *'view @w1/status-label kind=label'*'Refreshed from bridge. Count 1.'*) ;; *) echo "native-shell status view did not reflect bridge refresh" >&2; exit 1 ;; esac
+        \\echo "native-shell smoke ok"
+        ,
+        "sh",
+    });
+    native_shell_smoke_run.addFileArg(cli_exe.getEmittedBin());
+    native_shell_smoke_run.step.dependOn(&native_shell_smoke_build.step);
+    native_shell_smoke_run.step.dependOn(&cli_exe.step);
+    native_shell_smoke_step.dependOn(&native_shell_smoke_run.step);
+
     const webview_cef_smoke_step = b.step("test-webview-cef-smoke", "Run macOS Chromium WebView automation smoke test");
     const webview_cef_smoke_build = b.addSystemCommand(&.{ "zig", "build", "-Dplatform=macos", "-Dweb-engine=chromium", b.fmt("-Dcef-dir={s}", .{cef_dir}), "-Dautomation=true", "-Djs-bridge=true" });
     webview_cef_smoke_build.setCwd(b.path("examples/webview"));

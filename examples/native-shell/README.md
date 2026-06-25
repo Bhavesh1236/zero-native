@@ -20,3 +20,9 @@ Run the headless test path:
 ```sh
 zig build test -Dplatform=null
 ```
+
+Run the macOS automation smoke path from the repository root:
+
+```sh
+zig build test-native-shell-smoke -Dplatform=macos
+```
