@@ -639,7 +639,7 @@ pub const Runtime = struct {
                 self.updateWindowState(state) catch |err| try self.log("window.state.update_failed", @errorName(err), &.{trace.string("label", state.label)});
                 self.relayoutShellViews(state.id) catch |err| try self.log("shell.relayout_failed", @errorName(err), &.{trace.uint("window_id", state.id)});
                 if (self.options.window_state_store) |store| {
-                    store.saveWindow(state) catch |err| try self.log("window.state.save_failed", @errorName(err), &.{trace.string("label", state.label)});
+                    store.saveWindow(self.runtimeWindowStateForPersistence(state)) catch |err| try self.log("window.state.save_failed", @errorName(err), &.{trace.string("label", state.label)});
                 }
                 try self.log("window.frame", "window frame updated", &.{
                     trace.string("label", state.label),
@@ -1095,20 +1095,28 @@ pub const Runtime = struct {
     }
 
     fn updateWindowState(self: *Runtime, state: platform.WindowState) !void {
-        const index = self.findWindowIndexById(state.id) orelse try self.reserveWindow(state.id, state.label, state.title, null);
+        const existing_index = self.findWindowIndexById(state.id);
+        const index = existing_index orelse try self.reserveWindow(state.id, state.label, state.title, null);
         var info = self.windows[index].info;
         info.frame = state.frame;
         info.scale_factor = state.scale_factor;
         info.open = state.open;
         info.focused = state.focused;
-        if (state.title.len > 0) info.title = try copyInto(&self.windows[index].title_storage, state.title);
-        if (state.label.len > 0 and !std.mem.eql(u8, state.label, info.label)) info.label = try copyInto(&self.windows[index].label_storage, state.label);
         self.windows[index].info = info;
         if (!self.windows[index].main_frame_set) {
             self.windows[index].main_frame = geometry.RectF.init(0, 0, state.frame.width, state.frame.height);
         }
         if (!state.open) self.removeWindowRuntimeViews(state.id);
         if (state.focused) self.setFocusedIndex(index);
+    }
+
+    fn runtimeWindowStateForPersistence(self: *const Runtime, state: platform.WindowState) platform.WindowState {
+        var persisted = state;
+        if (self.findWindowIndexById(state.id)) |index| {
+            persisted.label = self.windows[index].info.label;
+            persisted.title = self.windows[index].info.title;
+        }
+        return persisted;
     }
 
     fn removeWindowRuntimeViews(self: *Runtime, window_id: platform.WindowId) void {
@@ -4609,7 +4617,7 @@ test "runtime loads scene hook as native shell startup" {
             .{ .label = "status", .kind = .statusbar, .edge = .bottom, .height = 28, .text = "Ready" },
         };
         const scene_windows = [_]app_manifest.ShellWindow{.{
-            .label = "main",
+            .label = "workspace",
             .title = "Scene Shell",
             .width = 900,
             .height = 600,
@@ -4643,6 +4651,8 @@ test "runtime loads scene hook as native shell startup" {
 
     var harness: TestHarness() = undefined;
     harness.init(.{ .id = 1, .size = geometry.SizeF.init(900, 600) });
+    const state_store = window_state.Store.init(std.testing.io, ".zig-cache/test-runtime-scene-window-state", ".zig-cache/test-runtime-scene-window-state/windows.zon");
+    harness.runtime.options.window_state_store = state_store;
     var app_state: TestApp = .{};
     try harness.start(app_state.app());
 
@@ -4653,8 +4663,27 @@ test "runtime loads scene hook as native shell startup" {
     var windows_buffer: [2]platform.WindowInfo = undefined;
     const windows = harness.runtime.listWindows(&windows_buffer);
     try std.testing.expectEqual(@as(usize, 1), windows.len);
-    try std.testing.expectEqualStrings("main", windows[0].label);
+    try std.testing.expectEqualStrings("workspace", windows[0].label);
     try std.testing.expectEqualStrings("Scene Shell", windows[0].title);
+
+    try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .window_frame_changed = .{
+        .id = 1,
+        .label = "main",
+        .title = "Native Startup",
+        .frame = geometry.RectF.init(0, 0, 900, 600),
+        .scale_factor = 1,
+        .open = true,
+        .focused = true,
+    } });
+
+    const updated_windows = harness.runtime.listWindows(&windows_buffer);
+    try std.testing.expectEqual(@as(usize, 1), updated_windows.len);
+    try std.testing.expectEqualStrings("workspace", updated_windows[0].label);
+    try std.testing.expectEqualStrings("Scene Shell", updated_windows[0].title);
+    var state_buffer: [window_state.max_serialized_bytes]u8 = undefined;
+    const persisted = (try state_store.loadWindow("workspace", &state_buffer)).?;
+    try std.testing.expectEqualStrings("workspace", persisted.label);
+    try std.testing.expectEqualStrings("Scene Shell", persisted.title);
 
     var views_buffer: [8]platform.ViewInfo = undefined;
     const views = harness.runtime.listViews(1, &views_buffer);

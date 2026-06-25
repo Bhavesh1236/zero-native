@@ -321,6 +321,8 @@ pub fn validateFile(allocator: std.mem.Allocator, io: std.Io, path: []const u8) 
     const url_schemes = parseUrlSchemes(allocator, metadata.url_schemes) catch return .{ .ok = false, .message = "app.zon URL schemes are invalid" };
     defer allocator.free(url_schemes);
     const manifest_web_engine = parseWebEngine(metadata.web_engine) catch return .{ .ok = false, .message = "app.zon web engine is invalid" };
+    const platform_settings = parsePlatformSettings(allocator, metadata.platforms) catch return .{ .ok = false, .message = "app.zon platforms are invalid" };
+    defer allocator.free(platform_settings);
 
     const manifest: app_manifest.Manifest = .{
         .identity = .{ .id = metadata.id, .name = metadata.name, .display_name = metadata.display_name },
@@ -330,7 +332,7 @@ pub fn validateFile(allocator: std.mem.Allocator, io: std.Io, path: []const u8) 
         .bridge = .{ .commands = bridge_commands },
         .frontend = frontend,
         .security = security,
-        .platforms = parsePlatformSettings(allocator, metadata.platforms) catch return .{ .ok = false, .message = "app.zon platforms are invalid" },
+        .platforms = platform_settings,
         .windows = windows,
         .shell = shell,
         .commands = commands,
