@@ -187,6 +187,7 @@ pub fn createAndroidSkeleton(io: std.Io, output_path: []const u8) !PackageStats 
     defer dir.close(io);
     try dir.createDirPath(io, "app/src/main/java/dev/zero_native");
     try dir.createDirPath(io, "app/src/main/cpp/lib");
+    try dir.createDirPath(io, "app/src/main/res/values");
     try writeFile(dir, io, "README.md", androidReadme());
     try writeFile(dir, io, "settings.gradle", "pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\ndependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }\nrootProject.name = 'zero-nativeHost'\ninclude ':app'\n");
     try writeFile(dir, io, "app/build.gradle", androidBuildGradle());
@@ -195,6 +196,7 @@ pub fn createAndroidSkeleton(io: std.Io, output_path: []const u8) !PackageStats 
     try writeFile(dir, io, "app/src/main/cpp/CMakeLists.txt", androidCMakeLists());
     try writeFile(dir, io, "app/src/main/cpp/zero_native_jni.c", androidJni());
     try writeFile(dir, io, "app/src/main/cpp/zero_native.h", embedHeader());
+    try writeFile(dir, io, "app/src/main/res/values/styles.xml", androidStyles());
     return .{ .path = output_path, .target = .android };
 }
 
@@ -662,6 +664,18 @@ fn androidManifestForMetadata(allocator: std.mem.Allocator, metadata: manifest_t
         \\</manifest>
         \\
     , .{label});
+}
+
+fn androidStyles() []const u8 {
+    return
+    \\<resources>
+    \\    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+    \\        <item name="android:windowLightStatusBar">true</item>
+    \\        <item name="android:colorAccent">#2563EB</item>
+    \\    </style>
+    \\</resources>
+    \\
+    ;
 }
 
 fn androidApplicationIdAlloc(allocator: std.mem.Allocator, id: []const u8) ![]const u8 {
@@ -1691,6 +1705,9 @@ test "mobile skeletons create native library drop-in directories" {
 
     var cmake = try cwd.openFile(std.testing.io, ".zig-cache/test-package-mobile-skeletons/android/app/src/main/cpp/CMakeLists.txt", .{});
     cmake.close(std.testing.io);
+
+    var styles = try cwd.openFile(std.testing.io, ".zig-cache/test-package-mobile-skeletons/android/app/src/main/res/values/styles.xml", .{});
+    styles.close(std.testing.io);
 }
 
 test "mobile package artifacts use manifest identity metadata" {
