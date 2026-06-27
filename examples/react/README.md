@@ -8,7 +8,7 @@ A super basic zero-native example using React for the frontend and Zig for the n
 zig build run
 ```
 
-The build installs frontend dependencies, builds the frontend, and opens the native WebView shell.
+The build installs frontend dependencies, builds the frontend, and opens the native app shell with WebView content.
 
 ## Dev Server
 

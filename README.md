@@ -1,8 +1,8 @@
 # zero-native
 
-Build native desktop apps with web UI. Tiny binaries. Minimal memory. Instant rebuilds.
+Build native desktop apps with Zig, secure WebView surfaces, native controls, and OS capabilities. Tiny binaries. Minimal memory. Instant rebuilds.
 
-zero-native is a Zig desktop app shell for modern web frontends. Use the platform WebView when you want the smallest possible app, or bundle Chromium through CEF when rendering consistency matters.
+zero-native is a native app framework where WebView content is one first-class surface, not the whole app model. Use native windows, menus, shortcuts, controls, dialogs, and OS services around rich web product UI. Use the platform WebView when you want the smallest possible app, or bundle Chromium through CEF when rendering consistency matters.
 
 ## Quick Start
 
@@ -20,11 +20,15 @@ cd my_app
 zig build run
 ```
 
-The first run installs frontend dependencies, builds the generated native shell, and opens a desktop window rendering your web UI.
+The first run installs frontend dependencies, builds the generated native shell, and opens a desktop window rendering your WebView content.
 
 Read the full guide at [zero-native.dev/quick-start](https://zero-native.dev/quick-start).
 
 ## Why zero-native
+
+### Native shell, web where it fits
+
+Build app chrome and trusted utility surfaces with native views, while keeping WebViews available for rich product UI, frontend framework workflows, and rendering consistency when you need it.
 
 ### Tiny and fast
 
@@ -38,7 +42,7 @@ Pick the engine that fits the product. System WebView gives you a lightweight na
 
 The native layer is Zig, so app logic, bridge commands, and platform integrations rebuild quickly. Your frontend can still use the web tooling you already know.
 
-### Native power without heavy glue
+### OS power without heavy glue
 
 Zig calls C directly, which keeps platform SDKs, native libraries, codecs, and local system integrations within reach when the WebView layer needs to do real native work.
 
@@ -48,19 +52,21 @@ The WebView is treated as untrusted by default. Native commands, permissions, na
 
 ## Status
 
-zero-native is pre-release. Desktop support now covers macOS 11+, Linux, and Windows build paths, with Chromium/CEF distributed as platform-specific runtimes.
+zero-native is pre-release. Desktop support now covers macOS 11+, Linux, and Windows build paths, native controls on system-WebView hosts, and Chromium/CEF distributed as platform-specific runtimes.
 
 ## Core Concepts
 
-`App` is the small Zig object that describes your application: name, WebView source, lifecycle hooks, and optional native services.
+`App` is the small Zig object that describes your application: name, WebView source, lifecycle hooks, an optional native scene, and native services.
 
-`Runtime` owns the event loop, windows, bridge dispatch, automation hooks, tracing, and platform services.
+`Runtime` owns the event loop, windows, native views, WebViews, command routing, bridge dispatch, automation hooks, tracing, and platform services.
 
-`WebViewSource` tells the runtime what to load: inline HTML, a URL, or packaged frontend assets served from a local app origin.
+`ShellConfig` declares native-first windows and view trees: toolbars, sidebars, status bars, split panes, stacks, controls, WebViews, and future surface kinds.
 
-`app.zon` is the app manifest. It declares app metadata, icons, windows, frontend assets, web engine selection, security policy, bridge permissions, and packaging inputs.
+`WebViewSource` tells the runtime what a WebView should load: inline HTML, a URL, or packaged frontend assets served from a local app origin.
 
-`window.zero.invoke()` is the JavaScript-to-Zig bridge. Calls are size-limited, origin checked, permission checked, and routed only to registered handlers.
+`app.zon` is the app manifest. It declares app metadata, icons, windows, native shell views, frontend assets, web engine selection, security policy, bridge permissions, and packaging inputs.
+
+`window.zero.*` is the guarded JavaScript-to-native bridge for commands, windows, views, WebViews, dialogs, clipboard, credentials, and OS services. Calls are size-limited, origin checked, permission checked, and routed only to allowed handlers.
 
 ## Configuration
 
@@ -73,8 +79,8 @@ Most project-level behavior lives in `app.zon`:
     .display_name = "My App",
     .version = "0.1.0",
     .web_engine = "system",
-    .permissions = .{ "window" },
-    .capabilities = .{ "webview", "js_bridge" },
+    .permissions = .{},
+    .capabilities = .{ "webview" },
     .security = .{
         .navigation = .{
             .allowed_origins = .{ "zero://app", "http://127.0.0.1:5173" },
@@ -95,6 +101,11 @@ The full documentation is at [zero-native.dev](https://zero-native.dev).
 - [Quick Start](https://zero-native.dev/quick-start)
 - [Web Engines](https://zero-native.dev/web-engines)
 - [App Model](https://zero-native.dev/app-model)
+- [Native Surfaces](https://zero-native.dev/native-surfaces)
+- [Native Controls](https://zero-native.dev/native-controls)
+- [Commands](https://zero-native.dev/commands)
+- [Capabilities](https://zero-native.dev/capabilities)
+- [Platform Support](https://zero-native.dev/platform-support)
 - [Bridge](https://zero-native.dev/bridge)
 - [Security](https://zero-native.dev/security)
 - [Packaging](https://zero-native.dev/packaging)
@@ -109,6 +120,14 @@ Framework-specific starter examples live in `examples/`:
 - `examples/vue`
 
 Each example is a complete zero-native app with `app.zon`, a Zig shell, and a minimal frontend project. Run one with `zig build run` from its directory.
+
+Native-first examples are available too:
+
+- `examples/command-app` - shared command routing across native controls, menus, shortcuts, tray, and bridge calls
+- `examples/native-shell` - native toolbar/sidebar/statusbar chrome around WebView content
+- `examples/native-panels` - split/stack native panel composition with WebView content
+- `examples/capabilities` - guarded OS services such as notifications, clipboard, dialogs, credentials, file drops, and recent documents
+- `examples/mobile-shell` - shared metadata for the iOS and Android native shell hosts
 
 Mobile embedding examples are available too:
 

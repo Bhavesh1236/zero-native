@@ -1,6 +1,6 @@
 # zero-native
 
-CLI tools for [zero-native](https://zero-native.dev), a Zig desktop app shell built around the system WebView.
+CLI tools for [zero-native](https://zero-native.dev), a Zig native app framework with secure WebView surfaces, native controls, and OS capabilities.
 
 ## Install
 
@@ -17,6 +17,8 @@ zig build run
 ```
 
 The first run installs the generated frontend dependencies automatically.
+
+Use WebViews for rich product UI, and add native windows, menus, shortcuts, views, dialogs, clipboard, credentials, and OS services where the platform should own the interaction.
 
 ## Commands
 
@@ -35,4 +37,4 @@ The first run installs the generated frontend dependencies automatically.
 
 ## More
 
-See the [full documentation](https://zero-native.dev) for details on the app model, bridge, security, and packaging.
+See the [full documentation](https://zero-native.dev) for details on the app model, native controls, capabilities, bridge, security, and packaging.

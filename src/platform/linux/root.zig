@@ -20,6 +20,11 @@ const GtkEventKind = enum(c_int) {
     resize = 3,
     window_frame = 4,
     shortcut = 5,
+    native_command = 6,
+    app_activated = 7,
+    app_deactivated = 8,
+    menu_command = 9,
+    files_dropped = 10,
 };
 
 const GtkEvent = extern struct {
@@ -41,6 +46,12 @@ const GtkEvent = extern struct {
     shortcut_key: [*]const u8,
     shortcut_key_len: usize,
     shortcut_modifiers: u32,
+    command_name: [*]const u8,
+    command_name_len: usize,
+    view_label: [*]const u8,
+    view_label_len: usize,
+    drop_paths: [*]const u8,
+    drop_paths_len: usize,
 };
 
 const GtkCallback = *const fn (context: ?*anyopaque, event: *const GtkEvent) callconv(.c) void;
@@ -64,18 +75,36 @@ extern fn zero_native_gtk_bridge_respond_window(host: *GtkHost, window_id: u64, 
 extern fn zero_native_gtk_bridge_respond_webview(host: *GtkHost, window_id: u64, webview_label: [*]const u8, webview_label_len: usize, response: [*]const u8, response_len: usize) void;
 extern fn zero_native_gtk_emit_window_event(host: *GtkHost, window_id: u64, name: [*]const u8, name_len: usize, detail_json: [*]const u8, detail_json_len: usize) void;
 extern fn zero_native_gtk_set_security_policy(host: *GtkHost, allowed_origins: [*]const u8, allowed_origins_len: usize, external_urls: [*]const u8, external_urls_len: usize, external_action: c_int) void;
+extern fn zero_native_gtk_set_menus(host: *GtkHost, menu_titles: [*]const [*]const u8, menu_title_lens: [*]const usize, menu_count: usize, item_menu_indices: [*]const u32, item_labels: [*]const [*]const u8, item_label_lens: [*]const usize, item_commands: [*]const [*]const u8, item_command_lens: [*]const usize, item_keys: [*]const [*]const u8, item_key_lens: [*]const usize, item_modifiers: [*]const u32, item_separators: [*]const c_int, item_enabled: [*]const c_int, item_checked: [*]const c_int, item_count: usize) void;
 extern fn zero_native_gtk_set_shortcuts(host: *GtkHost, ids: [*]const [*]const u8, id_lens: [*]const usize, keys: [*]const [*]const u8, key_lens: [*]const usize, modifiers: [*]const u32, count: usize) void;
 extern fn zero_native_gtk_create_window(host: *GtkHost, window_id: u64, window_title: [*]const u8, window_title_len: usize, window_label: [*]const u8, window_label_len: usize, x: f64, y: f64, width: f64, height: f64, restore_frame: c_int) c_int;
 extern fn zero_native_gtk_focus_window(host: *GtkHost, window_id: u64) c_int;
 extern fn zero_native_gtk_close_window(host: *GtkHost, window_id: u64) c_int;
+extern fn zero_native_gtk_create_view(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, kind: c_int, parent: [*]const u8, parent_len: usize, x: f64, y: f64, width: f64, height: f64, layer: c_int, visible: c_int, enabled: c_int, role: [*]const u8, role_len: usize, accessibility_label: [*]const u8, accessibility_label_len: usize, text: [*]const u8, text_len: usize, command: [*]const u8, command_len: usize) c_int;
+extern fn zero_native_gtk_update_view(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, has_frame: c_int, x: f64, y: f64, width: f64, height: f64, has_layer: c_int, layer: c_int, has_visible: c_int, visible: c_int, has_enabled: c_int, enabled: c_int, has_role: c_int, role: [*]const u8, role_len: usize, has_accessibility_label: c_int, accessibility_label: [*]const u8, accessibility_label_len: usize, has_text: c_int, text: [*]const u8, text_len: usize, has_command: c_int, command: [*]const u8, command_len: usize) c_int;
+extern fn zero_native_gtk_set_view_frame(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, x: f64, y: f64, width: f64, height: f64) c_int;
+extern fn zero_native_gtk_set_view_visible(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, visible: c_int) c_int;
+extern fn zero_native_gtk_focus_view(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
+extern fn zero_native_gtk_close_view(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
 extern fn zero_native_gtk_create_webview(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, url: [*]const u8, url_len: usize, x: f64, y: f64, width: f64, height: f64, layer: c_int, transparent: c_int, bridge_enabled: c_int) c_int;
 extern fn zero_native_gtk_set_webview_frame(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, x: f64, y: f64, width: f64, height: f64) c_int;
 extern fn zero_native_gtk_navigate_webview(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, url: [*]const u8, url_len: usize) c_int;
 extern fn zero_native_gtk_set_webview_zoom(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, zoom: f64) c_int;
 extern fn zero_native_gtk_set_webview_layer(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, layer: c_int) c_int;
 extern fn zero_native_gtk_close_webview(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
+extern fn zero_native_gtk_open_external_url(host: *GtkHost, url: [*]const u8, url_len: usize) c_int;
+extern fn zero_native_gtk_reveal_path(host: *GtkHost, path: [*]const u8, path_len: usize) c_int;
+extern fn zero_native_gtk_show_notification(host: *GtkHost, title: [*]const u8, title_len: usize, subtitle: [*]const u8, subtitle_len: usize, body: [*]const u8, body_len: usize) c_int;
+extern fn zero_native_gtk_add_recent_document(host: *GtkHost, path: [*]const u8, path_len: usize) c_int;
+extern fn zero_native_gtk_clear_recent_documents(host: *GtkHost) c_int;
+extern fn zero_native_gtk_credentials_available(host: *GtkHost) c_int;
+extern fn zero_native_gtk_set_credential(host: *GtkHost, service: [*]const u8, service_len: usize, account: [*]const u8, account_len: usize, secret: [*]const u8, secret_len: usize) c_int;
+extern fn zero_native_gtk_get_credential(host: *GtkHost, service: [*]const u8, service_len: usize, account: [*]const u8, account_len: usize, buffer: [*]u8, buffer_len: usize) usize;
+extern fn zero_native_gtk_delete_credential(host: *GtkHost, service: [*]const u8, service_len: usize, account: [*]const u8, account_len: usize) c_int;
 extern fn zero_native_gtk_clipboard_read(host: *GtkHost, buffer: [*]u8, buffer_len: usize) usize;
 extern fn zero_native_gtk_clipboard_write(host: *GtkHost, text: [*]const u8, text_len: usize) void;
+extern fn zero_native_gtk_clipboard_read_data(host: *GtkHost, mime_type: [*]const u8, mime_type_len: usize, buffer: [*]u8, buffer_len: usize) usize;
+extern fn zero_native_gtk_clipboard_write_data(host: *GtkHost, mime_type: [*]const u8, mime_type_len: usize, bytes: [*]const u8, bytes_len: usize) c_int;
 
 const GtkOpenDialogOpts = extern struct {
     title: [*]const u8,
@@ -166,10 +195,13 @@ pub const LinuxPlatform = struct {
             .name = "linux",
             .surface_value = self.surface_value,
             .run_fn = run,
+            .supports_fn = supportsFeature,
             .services = .{
                 .context = self,
                 .read_clipboard_fn = readClipboard,
                 .write_clipboard_fn = writeClipboard,
+                .read_clipboard_data_fn = readClipboardData,
+                .write_clipboard_data_fn = writeClipboardData,
                 .load_webview_fn = loadWebView,
                 .load_window_webview_fn = loadWindowWebView,
                 .complete_bridge_fn = completeBridge,
@@ -178,6 +210,12 @@ pub const LinuxPlatform = struct {
                 .create_window_fn = createWindow,
                 .focus_window_fn = focusWindow,
                 .close_window_fn = closeWindow,
+                .create_view_fn = createView,
+                .update_view_fn = updateView,
+                .set_view_frame_fn = setViewFrame,
+                .set_view_visible_fn = setViewVisible,
+                .focus_view_fn = focusView,
+                .close_view_fn = closeView,
                 .create_webview_fn = createWebView,
                 .set_webview_frame_fn = setWebViewFrame,
                 .navigate_webview_fn = navigateWebView,
@@ -187,15 +225,55 @@ pub const LinuxPlatform = struct {
                 .show_open_dialog_fn = showOpenDialog,
                 .show_save_dialog_fn = showSaveDialog,
                 .show_message_dialog_fn = showMessageDialog,
+                .open_external_url_fn = openExternalUrl,
+                .reveal_path_fn = revealPath,
+                .show_notification_fn = showNotification,
+                .add_recent_document_fn = addRecentDocument,
+                .clear_recent_documents_fn = clearRecentDocuments,
+                .set_credential_fn = setCredential,
+                .get_credential_fn = getCredential,
+                .delete_credential_fn = deleteCredential,
                 .create_tray_fn = createTray,
                 .update_tray_menu_fn = updateTrayMenu,
                 .remove_tray_fn = removeTray,
                 .configure_security_policy_fn = configureSecurityPolicy,
+                .configure_menus_fn = configureMenus,
                 .configure_shortcuts_fn = configureShortcuts,
                 .emit_window_event_fn = emitWindowEvent,
             },
             .app_info = self.app_info,
         };
+    }
+
+    fn supportsFeature(context: *anyopaque, feature: platform_mod.PlatformFeature) bool {
+        const self: *LinuxPlatform = @ptrCast(@alignCast(context));
+        return switch (feature) {
+            .main_webview,
+            .child_webviews,
+            .native_views,
+            .native_control_commands,
+            .menus,
+            .shortcuts,
+            .dialogs,
+            .clipboard_text,
+            .clipboard_rich_data,
+            .open_url,
+            .reveal_path,
+            .notifications,
+            .recent_documents,
+            .file_drops,
+            .app_activation_events,
+            => self.web_engine == .system,
+            .credentials => self.web_engine == .system and credentialsAvailable(self.host),
+            .gpu_surfaces => false,
+            .tray => false,
+        };
+    }
+
+    fn credentialsAvailable(host: *GtkHost) bool {
+        if (comptime @import("builtin").is_test) return false;
+        if (@import("builtin").target.os.tag != .linux) return false;
+        return zero_native_gtk_credentials_available(host) != 0;
     }
 
     fn run(context: *anyopaque, handler: platform_mod.EventHandler, handler_context: *anyopaque) anyerror!void {
@@ -242,6 +320,8 @@ fn gtkCallback(context: ?*anyopaque, event: *const GtkEvent) callconv(.c) void {
         .start => state.emit(.app_start),
         .frame => state.emit(.frame_requested),
         .shutdown => state.emit(.app_shutdown),
+        .app_activated => state.emit(.app_activated),
+        .app_deactivated => state.emit(.app_deactivated),
         .resize => {
             const surface: platform_mod.Surface = .{
                 .id = event.window_id,
@@ -274,6 +354,23 @@ fn gtkCallback(context: ?*anyopaque, event: *const GtkEvent) callconv(.c) void {
             .modifiers = shortcutModifiersFromFlags(event.shortcut_modifiers),
             .window_id = event.window_id,
         } }),
+        .native_command => state.emit(.{ .native_command = .{
+            .name = event.command_name[0..event.command_name_len],
+            .window_id = event.window_id,
+            .view_label = event.view_label[0..event.view_label_len],
+        } }),
+        .menu_command => state.emit(.{ .menu_command = .{
+            .name = event.command_name[0..event.command_name_len],
+            .window_id = event.window_id,
+        } }),
+        .files_dropped => {
+            var paths_buffer: [platform_mod.max_drop_paths][]const u8 = undefined;
+            const paths = platform_mod.splitDropPaths(event.drop_paths[0..event.drop_paths_len], paths_buffer[0..]);
+            state.emit(.{ .files_dropped = .{
+                .window_id = event.window_id,
+                .paths = paths,
+            } });
+        },
     }
 }
 
@@ -289,12 +386,26 @@ fn gtkBridgeCallback(context: ?*anyopaque, window_id: u64, webview_label: [*]con
 
 fn readClipboard(context: ?*anyopaque, buffer: []u8) anyerror![]const u8 {
     const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
-    return buffer[0..zero_native_gtk_clipboard_read(self.host, buffer.ptr, buffer.len)];
+    const len = zero_native_gtk_clipboard_read(self.host, buffer.ptr, buffer.len);
+    if (len > buffer.len) return error.NoSpaceLeft;
+    return buffer[0..len];
 }
 
 fn writeClipboard(context: ?*anyopaque, text: []const u8) anyerror!void {
     const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
     zero_native_gtk_clipboard_write(self.host, text.ptr, text.len);
+}
+
+fn readClipboardData(context: ?*anyopaque, mime_type: []const u8, buffer: []u8) anyerror![]const u8 {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    const len = zero_native_gtk_clipboard_read_data(self.host, mime_type.ptr, mime_type.len, buffer.ptr, buffer.len);
+    if (len > buffer.len) return error.NoSpaceLeft;
+    return buffer[0..len];
+}
+
+fn writeClipboardData(context: ?*anyopaque, data: platform_mod.ClipboardData) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (zero_native_gtk_clipboard_write_data(self.host, data.mime_type.ptr, data.mime_type.len, data.bytes.ptr, data.bytes.len) == 0) return error.UnsupportedService;
 }
 
 fn loadWebView(context: ?*anyopaque, source: platform_mod.WebViewSource) anyerror!void {
@@ -370,6 +481,103 @@ fn closeWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!
     if (zero_native_gtk_close_window(self.host, window_id) == 0) return error.CloseFailed;
 }
 
+fn createView(context: ?*anyopaque, options: platform_mod.ViewOptions) anyerror!void {
+    if (options.kind == .webview) return createWebView(context, options.webViewOptions());
+    if (!isSupportedNativeViewKind(options.kind)) return error.UnsupportedViewKind;
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedViewKind;
+    const frame = options.frame;
+    const parent = options.parent orelse "";
+    if (zero_native_gtk_create_view(
+        self.host,
+        options.window_id,
+        options.label.ptr,
+        options.label.len,
+        viewKindInt(options.kind),
+        parent.ptr,
+        parent.len,
+        frame.x,
+        frame.y,
+        frame.width,
+        frame.height,
+        options.layer,
+        if (options.visible) 1 else 0,
+        if (options.enabled) 1 else 0,
+        options.role.ptr,
+        options.role.len,
+        options.accessibility_label.ptr,
+        options.accessibility_label.len,
+        options.text.ptr,
+        options.text.len,
+        options.command.ptr,
+        options.command.len,
+    ) == 0) return error.CreateFailed;
+}
+
+fn updateView(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8, patch: platform_mod.ViewPatch) anyerror!void {
+    if (patch.url != null) return error.InvalidViewOptions;
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedViewKind;
+    const frame = patch.frame orelse geometry.RectF.init(0, 0, 0, 0);
+    const role = patch.role orelse "";
+    const accessibility_label = patch.accessibility_label orelse "";
+    const text = patch.text orelse "";
+    const command = patch.command orelse "";
+    if (zero_native_gtk_update_view(
+        self.host,
+        window_id,
+        label.ptr,
+        label.len,
+        if (patch.frame != null) 1 else 0,
+        frame.x,
+        frame.y,
+        frame.width,
+        frame.height,
+        if (patch.layer != null) 1 else 0,
+        patch.layer orelse 0,
+        if (patch.visible != null) 1 else 0,
+        if (patch.visible orelse false) 1 else 0,
+        if (patch.enabled != null) 1 else 0,
+        if (patch.enabled orelse false) 1 else 0,
+        if (patch.role != null) 1 else 0,
+        role.ptr,
+        role.len,
+        if (patch.accessibility_label != null) 1 else 0,
+        accessibility_label.ptr,
+        accessibility_label.len,
+        if (patch.text != null) 1 else 0,
+        text.ptr,
+        text.len,
+        if (patch.command != null) 1 else 0,
+        command.ptr,
+        command.len,
+    ) == 0) return error.ViewNotFound;
+}
+
+fn setViewFrame(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8, frame: geometry.RectF) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedViewKind;
+    if (zero_native_gtk_set_view_frame(self.host, window_id, label.ptr, label.len, frame.x, frame.y, frame.width, frame.height) == 0) return error.ViewNotFound;
+}
+
+fn setViewVisible(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8, visible: bool) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedViewKind;
+    if (zero_native_gtk_set_view_visible(self.host, window_id, label.ptr, label.len, if (visible) 1 else 0) == 0) return error.ViewNotFound;
+}
+
+fn focusView(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedViewFocus;
+    if (zero_native_gtk_focus_view(self.host, window_id, label.ptr, label.len) == 0) return error.UnsupportedViewFocus;
+}
+
+fn closeView(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedViewKind;
+    if (zero_native_gtk_close_view(self.host, window_id, label.ptr, label.len) == 0) return error.ViewNotFound;
+}
+
 fn createWebView(context: ?*anyopaque, options: platform_mod.WebViewOptions) anyerror!void {
     const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
     if (self.web_engine == .chromium) return error.UnsupportedChildWebViews;
@@ -435,6 +643,7 @@ fn showOpenDialog(context: ?*anyopaque, options: platform_mod.OpenDialogOptions,
         .allow_multiple = if (options.allow_multiple) 1 else 0,
     };
     const result = zero_native_gtk_show_open_dialog(self.host, &opts, buffer.ptr, buffer.len);
+    if (result.bytes_written > buffer.len) return error.NoSpaceLeft;
     return .{ .count = result.count, .paths = buffer[0..result.bytes_written] };
 }
 
@@ -453,6 +662,7 @@ fn showSaveDialog(context: ?*anyopaque, options: platform_mod.SaveDialogOptions,
         .extensions_len = ext_str.len,
     };
     const written = zero_native_gtk_show_save_dialog(self.host, &opts, buffer.ptr, buffer.len);
+    if (written > buffer.len) return error.NoSpaceLeft;
     if (written == 0) return null;
     return buffer[0..written];
 }
@@ -475,6 +685,93 @@ fn showMessageDialog(context: ?*anyopaque, options: platform_mod.MessageDialogOp
         .tertiary_button_len = options.tertiary_button.len,
     };
     return @enumFromInt(zero_native_gtk_show_message_dialog(self.host, &opts));
+}
+
+fn openExternalUrl(context: ?*anyopaque, url: []const u8) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_open_external_url(self.host, url.ptr, url.len) == 0) return error.UnsupportedService;
+}
+
+fn revealPath(context: ?*anyopaque, path: []const u8) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_reveal_path(self.host, path.ptr, path.len) == 0) return error.UnsupportedService;
+}
+
+fn showNotification(context: ?*anyopaque, options: platform_mod.NotificationOptions) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_show_notification(
+        self.host,
+        options.title.ptr,
+        options.title.len,
+        options.subtitle.ptr,
+        options.subtitle.len,
+        options.body.ptr,
+        options.body.len,
+    ) == 0) return error.UnsupportedService;
+}
+
+fn addRecentDocument(context: ?*anyopaque, path: []const u8) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_add_recent_document(self.host, path.ptr, path.len) == 0) return error.UnsupportedService;
+}
+
+fn clearRecentDocuments(context: ?*anyopaque) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_clear_recent_documents(self.host) == 0) return error.UnsupportedService;
+}
+
+fn setCredential(context: ?*anyopaque, credential: platform_mod.Credential) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_credentials_available(self.host) == 0) return error.UnsupportedService;
+    if (zero_native_gtk_set_credential(
+        self.host,
+        credential.service.ptr,
+        credential.service.len,
+        credential.account.ptr,
+        credential.account.len,
+        credential.secret.ptr,
+        credential.secret.len,
+    ) == 0) return error.UnsupportedService;
+}
+
+fn getCredential(context: ?*anyopaque, key: platform_mod.CredentialKey, buffer: []u8) anyerror![]const u8 {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_credentials_available(self.host) == 0) return error.UnsupportedService;
+    const len = zero_native_gtk_get_credential(
+        self.host,
+        key.service.ptr,
+        key.service.len,
+        key.account.ptr,
+        key.account.len,
+        buffer.ptr,
+        buffer.len,
+    );
+    if (len == std.math.maxInt(usize)) return error.UnsupportedService;
+    if (len == 0) return error.CredentialNotFound;
+    if (len > buffer.len) return error.NoSpaceLeft;
+    return buffer[0..len];
+}
+
+fn deleteCredential(context: ?*anyopaque, key: platform_mod.CredentialKey) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_credentials_available(self.host) == 0) return error.UnsupportedService;
+    const result = zero_native_gtk_delete_credential(
+        self.host,
+        key.service.ptr,
+        key.service.len,
+        key.account.ptr,
+        key.account.len,
+    );
+    if (result < 0) return error.UnsupportedService;
+    if (result == 0) return error.CredentialNotFound;
 }
 
 fn createTray(context: ?*anyopaque, options: platform_mod.TrayOptions) anyerror!void {
@@ -528,6 +825,65 @@ fn configureSecurityPolicy(context: ?*anyopaque, policy: security.Policy) anyerr
     );
 }
 
+fn configureMenus(context: ?*anyopaque, menus: []const platform_mod.Menu) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    try platform_mod.validateMenus(menus);
+    if (menus.len > 0 and self.web_engine != .system) return error.UnsupportedService;
+
+    var menu_titles: [platform_mod.max_menus][*]const u8 = undefined;
+    var menu_title_lens: [platform_mod.max_menus]usize = undefined;
+    var item_menu_indices: [platform_mod.max_menu_items]u32 = undefined;
+    var item_labels: [platform_mod.max_menu_items][*]const u8 = undefined;
+    var item_label_lens: [platform_mod.max_menu_items]usize = undefined;
+    var item_commands: [platform_mod.max_menu_items][*]const u8 = undefined;
+    var item_command_lens: [platform_mod.max_menu_items]usize = undefined;
+    var item_keys: [platform_mod.max_menu_items][*]const u8 = undefined;
+    var item_key_lens: [platform_mod.max_menu_items]usize = undefined;
+    var item_modifiers: [platform_mod.max_menu_items]u32 = undefined;
+    var item_separators: [platform_mod.max_menu_items]c_int = undefined;
+    var item_enabled: [platform_mod.max_menu_items]c_int = undefined;
+    var item_checked: [platform_mod.max_menu_items]c_int = undefined;
+
+    var item_count: usize = 0;
+    for (menus, 0..) |menu, menu_index| {
+        menu_titles[menu_index] = menu.title.ptr;
+        menu_title_lens[menu_index] = menu.title.len;
+        for (menu.items) |item| {
+            item_menu_indices[item_count] = @intCast(menu_index);
+            item_labels[item_count] = item.label.ptr;
+            item_label_lens[item_count] = item.label.len;
+            item_commands[item_count] = item.command.ptr;
+            item_command_lens[item_count] = item.command.len;
+            item_keys[item_count] = item.key.ptr;
+            item_key_lens[item_count] = item.key.len;
+            item_modifiers[item_count] = shortcutModifierFlags(item.modifiers);
+            item_separators[item_count] = if (item.separator) 1 else 0;
+            item_enabled[item_count] = if (item.enabled) 1 else 0;
+            item_checked[item_count] = if (item.checked) 1 else 0;
+            item_count += 1;
+        }
+    }
+
+    zero_native_gtk_set_menus(
+        self.host,
+        menu_titles[0..menus.len].ptr,
+        menu_title_lens[0..menus.len].ptr,
+        menus.len,
+        item_menu_indices[0..item_count].ptr,
+        item_labels[0..item_count].ptr,
+        item_label_lens[0..item_count].ptr,
+        item_commands[0..item_count].ptr,
+        item_command_lens[0..item_count].ptr,
+        item_keys[0..item_count].ptr,
+        item_key_lens[0..item_count].ptr,
+        item_modifiers[0..item_count].ptr,
+        item_separators[0..item_count].ptr,
+        item_enabled[0..item_count].ptr,
+        item_checked[0..item_count].ptr,
+        item_count,
+    );
+}
+
 fn configureShortcuts(context: ?*anyopaque, shortcuts: []const platform_mod.Shortcut) anyerror!void {
     const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
     if (shortcuts.len > platform_mod.max_shortcuts) return error.InvalidShortcut;
@@ -565,6 +921,88 @@ fn shortcutModifiersFromFlags(flags: u32) platform_mod.ShortcutModifiers {
         .control = (flags & shortcut_modifier_control) != 0,
         .option = (flags & shortcut_modifier_option) != 0,
         .shift = (flags & shortcut_modifier_shift) != 0,
+    };
+}
+
+fn isSupportedNativeViewKind(kind: platform_mod.ViewKind) bool {
+    return switch (kind) {
+        .toolbar,
+        .titlebar_accessory,
+        .sidebar,
+        .statusbar,
+        .split,
+        .stack,
+        .button,
+        .icon_button,
+        .checkbox,
+        .toggle,
+        .segmented_control,
+        .text_field,
+        .search_field,
+        .label,
+        .spacer,
+        .progress_indicator,
+        => true,
+        .webview,
+        .gpu_surface,
+        => false,
+    };
+}
+
+test "linux supports native container and control kinds" {
+    try std.testing.expect(isSupportedNativeViewKind(.split));
+    try std.testing.expect(isSupportedNativeViewKind(.stack));
+    try std.testing.expect(isSupportedNativeViewKind(.icon_button));
+    try std.testing.expect(!isSupportedNativeViewKind(.gpu_surface));
+}
+
+test "linux chromium reports unsupported desktop features" {
+    var system = testPlatformWithEngine(.system);
+    try std.testing.expect(LinuxPlatform.supportsFeature(&system, .main_webview));
+    try std.testing.expect(LinuxPlatform.supportsFeature(&system, .child_webviews));
+    try std.testing.expect(LinuxPlatform.supportsFeature(&system, .native_views));
+    try std.testing.expect(LinuxPlatform.supportsFeature(&system, .native_control_commands));
+    try std.testing.expect(LinuxPlatform.supportsFeature(&system, .menus));
+
+    var chromium = testPlatformWithEngine(.chromium);
+    try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .main_webview));
+    try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .shortcuts));
+    try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .child_webviews));
+    try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .native_views));
+    try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .native_control_commands));
+    try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .menus));
+    try std.testing.expect(!LinuxPlatform.supportsFeature(&chromium, .dialogs));
+}
+
+fn testPlatformWithEngine(web_engine: platform_mod.WebEngine) LinuxPlatform {
+    return .{
+        .host = undefined,
+        .web_engine = web_engine,
+        .app_info = .{},
+        .surface_value = .{},
+    };
+}
+
+fn viewKindInt(kind: platform_mod.ViewKind) c_int {
+    return switch (kind) {
+        .webview => 0,
+        .toolbar => 1,
+        .titlebar_accessory => 2,
+        .sidebar => 3,
+        .statusbar => 4,
+        .split => 5,
+        .stack => 6,
+        .button => 7,
+        .icon_button => 17,
+        .text_field => 8,
+        .search_field => 9,
+        .label => 10,
+        .spacer => 11,
+        .gpu_surface => 12,
+        .checkbox => 13,
+        .toggle => 14,
+        .progress_indicator => 15,
+        .segmented_control => 16,
     };
 }
 

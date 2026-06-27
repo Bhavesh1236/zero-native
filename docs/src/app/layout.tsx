@@ -12,26 +12,26 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL("https://zero-native.dev"),
   title: {
-    default: "zero-native | Desktop Apps with Zig + WebView",
+    default: "zero-native | Native Apps with Zig, Web, and OS Surfaces",
     template: "%s | zero-native",
   },
   description:
-    "Build desktop apps with Zig and selectable web engines. System WebView or bundled Chromium.",
+    "Build native apps with Zig, secure WebView surfaces, native controls, and OS capabilities.",
   openGraph: {
     type: "website",
     locale: "en_US",
     url: "https://zero-native.dev",
     siteName: "zero-native",
-    title: "zero-native | Desktop Apps with Zig + WebView",
+    title: "zero-native | Native Apps with Zig, Web, and OS Surfaces",
     description:
-      "Build desktop apps with Zig and selectable web engines. System WebView or bundled Chromium.",
+      "Build native apps with Zig, secure WebView surfaces, native controls, and OS capabilities.",
     images: [{ url: "/og", width: 1200, height: 630, alt: "zero-native" }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "zero-native | Desktop Apps with Zig + WebView",
+    title: "zero-native | Native Apps with Zig, Web, and OS Surfaces",
     description:
-      "Build desktop apps with Zig and selectable web engines. System WebView or bundled Chromium.",
+      "Build native apps with Zig, secure WebView surfaces, native controls, and OS capabilities.",
     images: ["/og"],
   },
 };

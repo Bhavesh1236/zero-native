@@ -24,13 +24,25 @@ pub const RuntimeOptions = runtime.Options;
 pub const App = runtime.App;
 pub const Event = runtime.Event;
 pub const LifecycleEvent = runtime.LifecycleEvent;
+pub const Command = runtime.Command;
 pub const CommandEvent = runtime.CommandEvent;
+pub const CommandSource = runtime.CommandSource;
 pub const TestHarness = runtime.TestHarness;
+pub const ShellConfig = app_manifest.ShellConfig;
+pub const ShellWindow = app_manifest.ShellWindow;
+pub const ShellView = app_manifest.ShellView;
+pub const ShellEdge = app_manifest.ShellEdge;
+pub const ShellAxis = app_manifest.ShellAxis;
 
 pub const WebViewSource = platform.WebViewSource;
 pub const WebViewSourceKind = platform.WebViewSourceKind;
 pub const WebViewAssetSource = platform.WebViewAssetSource;
 pub const WebEngine = platform.WebEngine;
+pub const PlatformFeature = platform.PlatformFeature;
+pub const ViewKind = platform.ViewKind;
+pub const ViewOptions = platform.ViewOptions;
+pub const ViewPatch = platform.ViewPatch;
+pub const ViewInfo = platform.ViewInfo;
 pub const AppInfo = platform.AppInfo;
 pub const Platform = platform.Platform;
 pub const NullPlatform = platform.NullPlatform;
@@ -40,6 +52,8 @@ pub const WindowCreateOptions = platform.WindowCreateOptions;
 pub const WindowInfo = platform.WindowInfo;
 pub const WindowState = platform.WindowState;
 pub const WindowRestorePolicy = platform.WindowRestorePolicy;
+pub const Menu = platform.Menu;
+pub const MenuItem = platform.MenuItem;
 pub const Shortcut = platform.Shortcut;
 pub const ShortcutModifiers = platform.ShortcutModifiers;
 pub const ShortcutEvent = platform.ShortcutEvent;
@@ -79,6 +93,14 @@ pub export fn zero_native_app_start(app: ?*anyopaque) void {
     embed.zero_native_app_start(app);
 }
 
+pub export fn zero_native_app_activate(app: ?*anyopaque) void {
+    embed.zero_native_app_activate(app);
+}
+
+pub export fn zero_native_app_deactivate(app: ?*anyopaque) void {
+    embed.zero_native_app_deactivate(app);
+}
+
 pub export fn zero_native_app_stop(app: ?*anyopaque) void {
     embed.zero_native_app_stop(app);
 }
@@ -91,6 +113,10 @@ pub export fn zero_native_app_touch(app: ?*anyopaque, id: u64, phase: c_int, x: 
     embed.zero_native_app_touch(app, id, phase, x, y, pressure);
 }
 
+pub export fn zero_native_app_command(app: ?*anyopaque, name: ?[*]const u8, len: usize) void {
+    embed.zero_native_app_command(app, name, len);
+}
+
 pub export fn zero_native_app_frame(app: ?*anyopaque) void {
     embed.zero_native_app_frame(app);
 }
@@ -99,8 +125,16 @@ pub export fn zero_native_app_set_asset_root(app: ?*anyopaque, path: [*]const u8
     embed.zero_native_app_set_asset_root(app, path, len);
 }
 
+pub export fn zero_native_app_set_asset_entry(app: ?*anyopaque, path: [*]const u8, len: usize) void {
+    embed.zero_native_app_set_asset_entry(app, path, len);
+}
+
 pub export fn zero_native_app_last_command_count(app: ?*anyopaque) usize {
     return embed.zero_native_app_last_command_count(app);
+}
+
+pub export fn zero_native_app_last_command_name(app: ?*anyopaque) [*:0]const u8 {
+    return embed.zero_native_app_last_command_name(app);
 }
 
 pub export fn zero_native_app_last_error_name(app: ?*anyopaque) [*:0]const u8 {

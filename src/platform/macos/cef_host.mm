@@ -2,8 +2,10 @@
 
 #import <AppKit/AppKit.h>
 #import <CoreFoundation/CoreFoundation.h>
+#import <Security/Security.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <crt_externs.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +46,7 @@ static const char *ZeroNativeCefBridgeScript();
 static NSRect ZeroNativeConstrainFrame(NSRect frame);
 static NSString *ZeroNativeResolvedAssetRoot(NSString *rootPath);
 static NSURL *ZeroNativeAssetEntryFileURL(NSString *rootPath, NSString *entryPath);
+static NSString *ZeroNativeSafeAssetPath(NSURL *url, NSString *entryPath);
 static NSArray<NSString *> *ZeroNativePolicyListFromBytes(const char *bytes, size_t len, NSArray<NSString *> *fallback);
 static NSString *ZeroNativeAbsolutePath(NSString *path);
 static NSString *ZeroNativeExistingPath(NSString *path);
@@ -53,6 +56,27 @@ static BOOL ZeroNativePolicyListMatches(NSArray<NSString *> *values, NSURL *url)
 static NSString *ZeroNativeShortcutKeyForEvent(NSEvent *event);
 static BOOL ZeroNativeShortcutUsesImplicitShift(NSString *key, NSEvent *event);
 static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEventModifierFlags eventModifiers, BOOL allowImplicitShift);
+
+static NSString *ZeroNativeStringFromBytes(const char *bytes, size_t len) {
+    if (!bytes || len == 0) return nil;
+    return [[NSString alloc] initWithBytes:bytes length:len encoding:NSUTF8StringEncoding];
+}
+
+static NSString *ZeroNativePasteboardTypeForMime(const char *mime_type, size_t mime_type_len) {
+    NSString *mime = ZeroNativeStringFromBytes(mime_type, mime_type_len).lowercaseString;
+    if ([mime isEqualToString:@"text"] || [mime isEqualToString:@"text/plain"]) return NSPasteboardTypeString;
+    if ([mime isEqualToString:@"text/html"]) return NSPasteboardTypeHTML;
+    if ([mime isEqualToString:@"text/rtf"] || [mime isEqualToString:@"application/rtf"]) return NSPasteboardTypeRTF;
+    return nil;
+}
+
+static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSString *account) {
+    return [@{
+        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecAttrService: service,
+        (__bridge id)kSecAttrAccount: account,
+    } mutableCopy];
+}
 
 class ZeroNativeCefBridgeV8Handler final : public CefV8Handler {
 public:
@@ -243,6 +267,27 @@ static NSURL *ZeroNativeAssetEntryFileURL(NSString *rootPath, NSString *entryPat
     return [NSURL fileURLWithPath:[ZeroNativeResolvedAssetRoot(rootPath ?: @"") stringByAppendingPathComponent:entry]];
 }
 
+static BOOL ZeroNativePathHasUnsafeSegment(NSString *path) {
+    for (NSString *segment in [path componentsSeparatedByString:@"/"]) {
+        if (segment.length == 0) continue;
+        if ([segment isEqualToString:@"."] || [segment isEqualToString:@".."]) return YES;
+        if ([segment containsString:@"\\"]) return YES;
+    }
+    return NO;
+}
+
+static NSString *ZeroNativeSafeAssetPath(NSURL *url, NSString *entryPath) {
+    if (!url) return nil;
+    NSString *path = url.path.stringByRemovingPercentEncoding ?: url.path;
+    if (path.length == 0 || [path isEqualToString:@"/"]) return entryPath.length > 0 ? entryPath : @"index.html";
+    while ([path hasPrefix:@"/"]) {
+        path = [path substringFromIndex:1];
+    }
+    if (path.length == 0) return entryPath.length > 0 ? entryPath : @"index.html";
+    if (ZeroNativePathHasUnsafeSegment(path)) return nil;
+    return path;
+}
+
 static NSString *ZeroNativeAbsolutePath(NSString *path) {
     if (path.length == 0) return [[NSFileManager defaultManager] currentDirectoryPath];
     if (path.isAbsolutePath) return path;
@@ -312,16 +357,30 @@ static const char *ZeroNativeCefBridgeScript() {
         "}"
         "function selector(value){return typeof value==='number'?{id:value}:{label:String(value)};}"
         "function ensureString(value,name){if(typeof value!=='string'||value.length===0){throw new TypeError(name+' must be a non-empty string');}return value;}"
+        "function ensureText(value,name){if(typeof value!=='string'){throw new TypeError(name+' must be a string');}return value;}"
         "function ensureNumber(value,name){if(typeof value!=='number'||!isFinite(value)){throw new TypeError(name+' must be a finite number');}return value;}"
+        "function commandPayload(value){if(typeof value==='string'){return {name:ensureString(value,'command')};}value=value||{};var name=value.name!=null?value.name:value.id;return {name:ensureString(name,'command')};}"
         "function validateWebViewSelector(options){if(options.label!=null){ensureString(options.label,'label');}if(options.windowId!=null&&(typeof options.windowId!=='number'||!isFinite(options.windowId)||options.windowId<0||Math.floor(options.windowId)!==options.windowId)){throw new TypeError('windowId must be a non-negative integer');}}"
         "function framePayload(options){options=options||{};validateWebViewSelector(options);var frame=options.frame||options;return {label:options.label,windowId:options.windowId,url:options.url,frame:{x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')}};}"
         "function createPayload(options){options=options||{};ensureString(options.url,'url');var payload=framePayload(options);if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.transparent!=null){payload.transparent=!!options.transparent;}if(options.bridge!=null){payload.bridge=!!options.bridge;}return payload;}"
         "function navigatePayload(options){options=options||{};validateWebViewSelector(options);ensureString(options.url,'url');return {label:options.label,windowId:options.windowId,url:options.url};}"
         "function closePayload(options){options=options||{};validateWebViewSelector(options);return {label:options.label,windowId:options.windowId};}"
         "function webviewHandle(info){return Object.freeze(Object.assign({},info,{setFrame:function(frame){return webviews.setFrame({label:info.label,windowId:info.windowId,frame:frame});},navigate:function(url){return webviews.navigate({label:info.label,windowId:info.windowId,url:url});},setZoom:function(zoom){return webviews.setZoom({label:info.label,windowId:info.windowId,zoom:zoom});},setLayer:function(layer){return webviews.setLayer({label:info.label,windowId:info.windowId,layer:layer});},close:function(){return webviews.close({label:info.label,windowId:info.windowId});}}));}"
+        "function validateViewSelector(options){options=options||{};ensureString(options.label,'label');if(options.windowId!=null&&(typeof options.windowId!=='number'||!isFinite(options.windowId)||options.windowId<0||Math.floor(options.windowId)!==options.windowId)){throw new TypeError('windowId must be a non-negative integer');}}"
+        "function viewSelectorPayload(options){if(typeof options==='string'){return {label:ensureString(options,'label')};}options=options||{};validateViewSelector(options);return {label:options.label,windowId:options.windowId};}"
+        "function optionalFramePayload(options){var frame=options.frame||((options.x!=null||options.y!=null||options.width!=null||options.height!=null)?options:null);if(!frame){return null;}return {x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')};}"
+        "function viewCreatePayload(options){options=options||{};validateViewSelector(options);ensureString(options.kind,'kind');var payload={label:options.label,kind:options.kind,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.parent!=null){payload.parent=ensureString(options.parent,'parent');}if(options.role!=null){payload.role=ensureText(options.role,'role');}if(options.accessibilityLabel!=null){payload.accessibilityLabel=ensureText(options.accessibilityLabel,'accessibilityLabel');}if(options.text!=null){payload.text=ensureText(options.text,'text');}if(options.command!=null){payload.command=ensureText(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.transparent!=null){payload.transparent=!!options.transparent;}if(options.bridge!=null){payload.bridge=!!options.bridge;}return payload;}"
+        "function viewPatchPayload(options){options=options||{};validateViewSelector(options);var payload={label:options.label,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.role!=null){payload.role=ensureText(options.role,'role');}if(options.accessibilityLabel!=null){payload.accessibilityLabel=ensureText(options.accessibilityLabel,'accessibilityLabel');}if(options.text!=null){payload.text=ensureText(options.text,'text');}if(options.command!=null){payload.command=ensureText(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}return payload;}"
+        "function viewFramePayload(options){options=options||{};validateViewSelector(options);var frame=options.frame||options;return {label:options.label,windowId:options.windowId,frame:{x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')}};}"
+        "function viewVisiblePayload(options){options=options||{};validateViewSelector(options);if(options.visible==null){throw new TypeError('visible is required');}return {label:options.label,windowId:options.windowId,visible:!!options.visible};}"
+        "function viewHandle(info){return Object.freeze(Object.assign({},info,{update:function(patch){return views.update(Object.assign({},patch||{},{label:info.label,windowId:info.windowId}));},setFrame:function(frame){return views.setFrame({label:info.label,windowId:info.windowId,frame:frame});},setVisible:function(visible){return views.setVisible({label:info.label,windowId:info.windowId,visible:visible});},focus:function(){return views.focus({label:info.label,windowId:info.windowId});},close:function(){return views.close({label:info.label,windowId:info.windowId});}}));}"
         "function on(name,callback){if(typeof callback!=='function'){throw new TypeError('callback must be a function');}var set=listeners.get(name);if(!set){set=new Set();listeners.set(name,set);}set.add(callback);return function(){off(name,callback);};}"
         "function off(name,callback){var set=listeners.get(name);if(set){set.delete(callback);if(set.size===0){listeners.delete(name);}}}"
         "function emit(name,detail){var set=listeners.get(name);if(set){Array.from(set).forEach(function(callback){callback(detail);});}window.dispatchEvent(new CustomEvent('zero-native:'+name,{detail:detail}));}"
+        "var commands=Object.freeze({"
+        "invoke:function(value){return invoke('zero-native.command.invoke',commandPayload(value));},"
+        "list:function(){return invoke('zero-native.command.list',{});}"
+        "});"
         "var windows=Object.freeze({"
         "create:function(options){return invoke('zero-native.window.create',options||{});},"
         "list:function(){return invoke('zero-native.window.list',{});},"
@@ -332,6 +391,32 @@ static const char *ZeroNativeCefBridgeScript() {
         "openFile:function(options){return invoke('zero-native.dialog.openFile',options||{});},"
         "saveFile:function(options){return invoke('zero-native.dialog.saveFile',options||{});},"
         "showMessage:function(options){return invoke('zero-native.dialog.showMessage',options||{});}"
+        "});"
+        "function clipboardReadPayload(value){value=value||{};return {mimeType:ensureString(value.mimeType||value.type||'text/plain','mimeType')};}"
+        "function clipboardWritePayload(value){if(typeof value==='string'){return {mimeType:'text/plain',data:value};}value=value||{};var data=value.data!=null?value.data:(value.text!=null?value.text:value.value);return {mimeType:ensureString(value.mimeType||value.type||'text/plain','mimeType'),data:ensureText(data,'data')};}"
+        "var clipboard=Object.freeze({"
+        "readText:function(){return invoke('zero-native.clipboard.readText',{});},"
+        "writeText:function(value){var text=typeof value==='string'?value:(value||{}).text;return invoke('zero-native.clipboard.writeText',{text:ensureText(text,'text')});},"
+        "read:function(value){return invoke('zero-native.clipboard.read',clipboardReadPayload(value));},"
+        "write:function(value){return invoke('zero-native.clipboard.write',clipboardWritePayload(value));}"
+        "});"
+        "var os=Object.freeze({"
+        "openUrl:function(value){var options=typeof value==='string'?{url:value}:(value||{});return invoke('zero-native.os.openUrl',{url:ensureString(options.url,'url')});},"
+        "showNotification:function(value){var options=typeof value==='string'?{title:value}:(value||{});var payload={title:ensureString(options.title,'title')};if(options.subtitle!=null){payload.subtitle=ensureString(options.subtitle,'subtitle');}if(options.body!=null){payload.body=ensureString(options.body,'body');}return invoke('zero-native.os.showNotification',payload);},"
+        "revealPath:function(value){var options=typeof value==='string'?{path:value}:(value||{});return invoke('zero-native.os.revealPath',{path:ensureString(options.path,'path')});},"
+        "addRecentDocument:function(value){var options=typeof value==='string'?{path:value}:(value||{});return invoke('zero-native.os.addRecentDocument',{path:ensureString(options.path,'path')});},"
+        "clearRecentDocuments:function(){return invoke('zero-native.os.clearRecentDocuments',{});}"
+        "});"
+        "function credentialPayload(value){value=value||{};return {service:ensureString(value.service,'service'),account:ensureString(value.account,'account')};}"
+        "function credentialSetPayload(value){var payload=credentialPayload(value);payload.secret=ensureString(value.secret!=null?value.secret:value.value,'secret');return payload;}"
+        "var credentials=Object.freeze({"
+        "set:function(value){return invoke('zero-native.credentials.set',credentialSetPayload(value));},"
+        "get:function(value){return invoke('zero-native.credentials.get',credentialPayload(value));},"
+        "delete:function(value){return invoke('zero-native.credentials.delete',credentialPayload(value));}"
+        "});"
+        "function platformFeaturePayload(value){if(typeof value==='string'){return {feature:ensureString(value,'feature')};}value=value||{};return {feature:ensureString(value.feature!=null?value.feature:value.name,'feature')};}"
+        "var platform=Object.freeze({"
+        "supports:function(value){return invoke('zero-native.platform.supports',platformFeaturePayload(value));}"
         "});"
         "function zoomPayload(options){options=options||{};validateWebViewSelector(options);return {label:options.label,windowId:options.windowId,zoom:ensureNumber(options.zoom,'zoom')};}"
         "function layerPayload(options){options=options||{};validateWebViewSelector(options);return {label:options.label,windowId:options.windowId,layer:ensureNumber(options.layer,'layer')};}"
@@ -344,7 +429,18 @@ static const char *ZeroNativeCefBridgeScript() {
         "setLayer:function(options){return invoke('zero-native.webview.setLayer',layerPayload(options));},"
         "close:function(options){return invoke('zero-native.webview.close',closePayload(options));}"
         "});"
-        "Object.defineProperty(window,'zero',{value:Object.freeze({invoke:invoke,on:on,off:off,windows:windows,dialogs:dialogs,webviews:webviews,_complete:complete,_emit:emit}),configurable:false});"
+        "var views=Object.freeze({"
+        "create:function(options){return invoke('zero-native.view.create',viewCreatePayload(options)).then(viewHandle);},"
+        "list:function(){return invoke('zero-native.view.list',{});},"
+        "update:function(options,patch){if(typeof options==='string'){return invoke('zero-native.view.update',viewPatchPayload(Object.assign({},patch||{},{label:options}))).then(viewHandle);}return invoke('zero-native.view.update',viewPatchPayload(options)).then(viewHandle);},"
+        "setFrame:function(options){return invoke('zero-native.view.setFrame',viewFramePayload(options)).then(viewHandle);},"
+        "setVisible:function(options){return invoke('zero-native.view.setVisible',viewVisiblePayload(options)).then(viewHandle);},"
+        "focus:function(options){return invoke('zero-native.view.focus',viewSelectorPayload(options)).then(viewHandle);},"
+        "focusNext:function(options){options=options||{};return invoke('zero-native.view.focusNext',{windowId:options.windowId}).then(viewHandle);},"
+        "focusPrevious:function(options){options=options||{};return invoke('zero-native.view.focusPrevious',{windowId:options.windowId}).then(viewHandle);},"
+        "close:function(options){return invoke('zero-native.view.close',viewSelectorPayload(options));}"
+        "});"
+        "Object.defineProperty(window,'zero',{value:Object.freeze({invoke:invoke,on:on,off:off,commands:commands,windows:windows,dialogs:dialogs,clipboard:clipboard,os:os,credentials:credentials,platform:platform,webviews:webviews,views:views,_complete:complete,_emit:emit}),configurable:false});"
         "})();";
 }
 
@@ -387,6 +483,9 @@ static const char *ZeroNativeCefBridgeScript() {
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, ZeroNativeChromiumWindowDelegate *> *delegates;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *bridgeOrigins;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *internalURLPrefixes;
+@property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *assetRoots;
+@property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *assetEntries;
+@property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *assetOrigins;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *windowLabels;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *fallbackURLs;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSView *> *webviewViews;
@@ -402,6 +501,7 @@ static const char *ZeroNativeCefBridgeScript() {
 @property(nonatomic, assign) void *context;
 @property(nonatomic, assign) void *bridgeContext;
 @property(nonatomic, assign) BOOL didShutdown;
+@property(nonatomic, assign) BOOL observesApplicationActivation;
 @property(nonatomic, strong) id shortcutEventMonitor;
 @property(nonatomic, strong) NSArray<ZeroNativeChromiumShortcut *> *shortcuts;
 @property(nonatomic, strong) NSStatusItem *statusItem;
@@ -426,6 +526,10 @@ static const char *ZeroNativeCefBridgeScript() {
 - (void)runWithCallback:(zero_native_appkit_event_callback_t)callback context:(void *)context;
 - (void)stop;
 - (void)emitEvent:(zero_native_appkit_event_t)event;
+- (void)startApplicationActivationObservers;
+- (void)stopApplicationActivationObservers;
+- (void)applicationDidBecomeActive:(NSNotification *)notification;
+- (void)applicationDidResignActive:(NSNotification *)notification;
 - (void)emitResize;
 - (void)emitResizeForWindowId:(uint64_t)windowId;
 - (void)emitWindowFrameForWindowId:(uint64_t)windowId open:(BOOL)open;
@@ -435,8 +539,10 @@ static const char *ZeroNativeCefBridgeScript() {
 - (void)loadSource:(NSString *)source kind:(NSInteger)kind assetRoot:(NSString *)assetRoot entry:(NSString *)entry origin:(NSString *)origin spaFallback:(BOOL)spaFallback windowId:(uint64_t)windowId;
 - (void)setAllowedNavigationOrigins:(NSArray<NSString *> *)origins externalURLs:(NSArray<NSString *> *)externalURLs externalAction:(NSInteger)externalAction;
 - (BOOL)isInternalURL:(NSURL *)url;
+- (BOOL)isInternalURL:(NSURL *)url windowId:(uint64_t)windowId;
 - (BOOL)allowsNavigationURL:(NSURL *)url;
 - (BOOL)openExternalURLIfAllowed:(NSURL *)url;
+- (NSString *)resolvedWebViewURLString:(NSString *)url windowId:(uint64_t)windowId;
 - (BOOL)createWebViewInWindow:(uint64_t)windowId label:(NSString *)label url:(NSString *)url x:(double)x y:(double)y width:(double)width height:(double)height layer:(NSInteger)layer transparent:(BOOL)transparent bridgeEnabled:(BOOL)bridgeEnabled;
 - (BOOL)setWebViewFrameInWindow:(uint64_t)windowId label:(NSString *)label x:(double)x y:(double)y width:(double)width height:(double)height;
 - (BOOL)navigateWebViewInWindow:(uint64_t)windowId label:(NSString *)label url:(NSString *)url;
@@ -452,7 +558,7 @@ static const char *ZeroNativeCefBridgeScript() {
 - (void)cleanupClosedWebViewWithKey:(NSString *)key;
 - (void)cleanupClosedWebViewWithKey:(NSString *)key generation:(uint64_t)generation;
 - (NSString *)fallbackURLForWindowId:(uint64_t)windowId;
-- (NSString *)bridgeOriginForWindowId:(uint64_t)windowId sourceURL:(NSString *)sourceURL;
+- (NSString *)bridgeOriginForWindowId:(uint64_t)windowId webViewLabel:(NSString *)webViewLabel sourceURL:(NSString *)sourceURL;
 - (void)receiveBridgePayload:(NSString *)payload origin:(NSString *)origin windowId:(uint64_t)windowId webViewLabel:(NSString *)webViewLabel;
 - (void)completeBridgeWithResponse:(NSString *)response;
 - (void)completeBridgeWithResponse:(NSString *)response windowId:(uint64_t)windowId;
@@ -495,6 +601,9 @@ static const char *ZeroNativeCefBridgeScript() {
     [self.host.delegates removeObjectForKey:key];
     [self.host.bridgeOrigins removeObjectForKey:key];
     [self.host.internalURLPrefixes removeObjectForKey:key];
+    [self.host.assetRoots removeObjectForKey:key];
+    [self.host.assetEntries removeObjectForKey:key];
+    [self.host.assetOrigins removeObjectForKey:key];
     [self.host.windowLabels removeObjectForKey:key];
     [self.host.fallbackURLs removeObjectForKey:key];
     if (self.host.browsers) self.host.browsers->erase(self.windowId);
@@ -523,6 +632,9 @@ static const char *ZeroNativeCefBridgeScript() {
     self.delegates = [[NSMutableDictionary alloc] init];
     self.bridgeOrigins = [[NSMutableDictionary alloc] init];
     self.internalURLPrefixes = [[NSMutableDictionary alloc] init];
+    self.assetRoots = [[NSMutableDictionary alloc] init];
+    self.assetEntries = [[NSMutableDictionary alloc] init];
+    self.assetOrigins = [[NSMutableDictionary alloc] init];
     self.windowLabels = [[NSMutableDictionary alloc] init];
     self.fallbackURLs = [[NSMutableDictionary alloc] init];
     self.webviewViews = [[NSMutableDictionary alloc] init];
@@ -542,6 +654,7 @@ static const char *ZeroNativeCefBridgeScript() {
 
     [self createWindowWithId:1 title:(title.length > 0 ? title : self.appName) label:@"main" x:0 y:0 width:width height:height restoreFrame:NO makeMain:YES];
     self.didShutdown = NO;
+    self.observesApplicationActivation = NO;
     return self;
 }
 
@@ -733,6 +846,7 @@ static const char *ZeroNativeCefBridgeScript() {
     [self emitEvent:(zero_native_appkit_event_t){ .kind = ZERO_NATIVE_APPKIT_EVENT_START }];
     [self emitResize];
     [self emitWindowFrameForWindowId:1 open:YES];
+    [self startApplicationActivationObservers];
     self.timer = [NSTimer scheduledTimerWithTimeInterval:(1.0 / 60.0)
                                                  target:self
                                                selector:@selector(emitFrame)
@@ -749,6 +863,7 @@ static const char *ZeroNativeCefBridgeScript() {
         [NSEvent removeMonitor:self.shortcutEventMonitor];
         self.shortcutEventMonitor = nil;
     }
+    [self stopApplicationActivationObservers];
     if (self.browsers) {
         for (auto &entry : *self.browsers) {
             if (entry.second) entry.second->GetHost()->CloseBrowser(true);
@@ -771,6 +886,32 @@ static const char *ZeroNativeCefBridgeScript() {
 
 - (void)emitEvent:(zero_native_appkit_event_t)event {
     if (self.callback) self.callback(self.context, &event);
+}
+
+- (void)startApplicationActivationObservers {
+    if (self.observesApplicationActivation) return;
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center addObserver:self selector:@selector(applicationDidBecomeActive:) name:NSApplicationDidBecomeActiveNotification object:NSApp];
+    [center addObserver:self selector:@selector(applicationDidResignActive:) name:NSApplicationDidResignActiveNotification object:NSApp];
+    self.observesApplicationActivation = YES;
+}
+
+- (void)stopApplicationActivationObservers {
+    if (!self.observesApplicationActivation) return;
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center removeObserver:self name:NSApplicationDidBecomeActiveNotification object:NSApp];
+    [center removeObserver:self name:NSApplicationDidResignActiveNotification object:NSApp];
+    self.observesApplicationActivation = NO;
+}
+
+- (void)applicationDidBecomeActive:(NSNotification *)notification {
+    (void)notification;
+    [self emitEvent:(zero_native_appkit_event_t){ .kind = ZERO_NATIVE_APPKIT_EVENT_APP_ACTIVATED }];
+}
+
+- (void)applicationDidResignActive:(NSNotification *)notification {
+    (void)notification;
+    [self emitEvent:(zero_native_appkit_event_t){ .kind = ZERO_NATIVE_APPKIT_EVENT_APP_DEACTIVATED }];
 }
 
 - (void)emitResize {
@@ -833,6 +974,7 @@ static const char *ZeroNativeCefBridgeScript() {
     NSString *urlString = source;
     NSString *bridgeOrigin = nil;
     NSString *internalURLPrefix = nil;
+    NSString *assetEntryPath = nil;
     if (kind == 0) {
         urlString = temporaryHtmlUrl(source);
         bridgeOrigin = @"zero://inline";
@@ -843,6 +985,8 @@ static const char *ZeroNativeCefBridgeScript() {
         while ([assetEntry hasPrefix:@"/"]) {
             assetEntry = [assetEntry substringFromIndex:1];
         }
+        if (assetEntry.length == 0) assetEntry = @"index.html";
+        assetEntryPath = assetEntry;
         urlString = [NSURL fileURLWithPath:[resolvedRoot stringByAppendingPathComponent:assetEntry]].absoluteString;
         bridgeOrigin = origin.length > 0 ? origin : @"zero://app";
         internalURLPrefix = [NSURL fileURLWithPath:resolvedRoot isDirectory:YES].absoluteString;
@@ -857,6 +1001,15 @@ static const char *ZeroNativeCefBridgeScript() {
         self.internalURLPrefixes[key] = internalURLPrefix;
     } else {
         [self.internalURLPrefixes removeObjectForKey:key];
+    }
+    if (kind == 2) {
+        self.assetRoots[key] = ZeroNativeResolvedAssetRoot(assetRoot ?: @"");
+        self.assetEntries[key] = assetEntryPath.length > 0 ? assetEntryPath : @"index.html";
+        self.assetOrigins[key] = bridgeOrigin.length > 0 ? bridgeOrigin : @"zero://app";
+    } else {
+        [self.assetRoots removeObjectForKey:key];
+        [self.assetEntries removeObjectForKey:key];
+        [self.assetOrigins removeObjectForKey:key];
     }
     if (kind == 2 && spaFallback) {
         self.fallbackURLs[key] = urlString;
@@ -903,6 +1056,8 @@ static const char *ZeroNativeCefBridgeScript() {
     if (!container || !stackView) return NO;
     NSURL *targetURL = [NSURL URLWithString:url];
     if (!targetURL || ![self allowsNavigationURL:targetURL]) return NO;
+    NSString *resolvedURL = [self resolvedWebViewURLString:url windowId:windowId];
+    if (resolvedURL.length == 0) return NO;
     NSString *key = [self webViewKeyForWindow:windowId label:label];
     if (self.webviewViews[key]) return NO;
 
@@ -926,7 +1081,7 @@ static const char *ZeroNativeCefBridgeScript() {
     CefRect rect(0, 0, webview.bounds.size.width, webview.bounds.size.height);
     windowInfo.SetAsChild((__bridge void *)webview, rect);
     CefBrowserSettings browserSettings;
-    CefBrowserHost::CreateBrowser(windowInfo, client.get(), std::string(url.UTF8String), browserSettings, ZeroNativeCefExtraInfo(bridgeEnabled), nullptr);
+    CefBrowserHost::CreateBrowser(windowInfo, client.get(), std::string(resolvedURL.UTF8String), browserSettings, ZeroNativeCefExtraInfo(bridgeEnabled), nullptr);
     return YES;
 }
 
@@ -963,11 +1118,13 @@ static const char *ZeroNativeCefBridgeScript() {
     if (label.length == 0 || url.length == 0) return NO;
     NSURL *targetURL = [NSURL URLWithString:url];
     if (!targetURL || ![self allowsNavigationURL:targetURL]) return NO;
+    NSString *resolvedURL = [self resolvedWebViewURLString:url windowId:windowId];
+    if (resolvedURL.length == 0) return NO;
     if ([label isEqualToString:@"main"]) {
         if (self.browsers) {
             auto it = self.browsers->find(windowId);
             if (it != self.browsers->end() && it->second) {
-                it->second->GetMainFrame()->LoadURL(std::string(url.UTF8String));
+                it->second->GetMainFrame()->LoadURL(std::string(resolvedURL.UTF8String));
                 return YES;
             }
         }
@@ -979,11 +1136,11 @@ static const char *ZeroNativeCefBridgeScript() {
     if (self.webviewBrowsers) {
         auto it = self.webviewBrowsers->find(keyString);
         if (it != self.webviewBrowsers->end() && it->second) {
-            it->second->GetMainFrame()->LoadURL(std::string(url.UTF8String));
+            it->second->GetMainFrame()->LoadURL(std::string(resolvedURL.UTF8String));
             return YES;
         }
     }
-    self.webviewPendingURLs[[self webViewKeyForWindow:windowId label:label]] = url;
+    self.webviewPendingURLs[[self webViewKeyForWindow:windowId label:label]] = resolvedURL;
     return YES;
 }
 
@@ -1119,6 +1276,12 @@ static const char *ZeroNativeCefBridgeScript() {
     return NO;
 }
 
+- (BOOL)isInternalURL:(NSURL *)url windowId:(uint64_t)windowId {
+    NSString *prefix = self.internalURLPrefixes[@(windowId)];
+    NSString *absolute = url.absoluteString ?: @"";
+    return prefix.length > 0 && [absolute hasPrefix:prefix];
+}
+
 - (BOOL)allowsNavigationURL:(NSURL *)url {
     if (!url) return YES;
     NSString *scheme = url.scheme.lowercaseString ?: @"";
@@ -1132,6 +1295,25 @@ static const char *ZeroNativeCefBridgeScript() {
     if (!ZeroNativePolicyListMatches(self.allowedExternalURLs, url)) return NO;
     [[NSWorkspace sharedWorkspace] openURL:url];
     return YES;
+}
+
+- (NSString *)resolvedWebViewURLString:(NSString *)url windowId:(uint64_t)windowId {
+    NSURL *targetURL = [NSURL URLWithString:url ?: @""];
+    if (!targetURL) return nil;
+    NSNumber *key = @(windowId);
+    NSString *assetOrigin = self.assetOrigins[key];
+    NSString *assetRoot = self.assetRoots[key];
+    NSString *assetEntry = self.assetEntries[key];
+    if (assetOrigin.length == 0 || assetRoot.length == 0) return url;
+    if (![ZeroNativeOriginForURL(targetURL) isEqualToString:assetOrigin]) return url;
+
+    NSString *relativePath = ZeroNativeSafeAssetPath(targetURL, assetEntry.length > 0 ? assetEntry : @"index.html");
+    if (!relativePath) return nil;
+    NSURL *fileURL = [NSURL fileURLWithPath:[assetRoot stringByAppendingPathComponent:relativePath]];
+    NSURLComponents *components = [NSURLComponents componentsWithURL:fileURL resolvingAgainstBaseURL:NO];
+    components.query = targetURL.query;
+    components.fragment = targetURL.fragment;
+    return components.URL.absoluteString ?: fileURL.absoluteString;
 }
 
 - (void)setBrowser:(CefRefPtr<CefBrowser>)browser windowId:(uint64_t)windowId {
@@ -1185,10 +1367,17 @@ static const char *ZeroNativeCefBridgeScript() {
     return self.fallbackURLs[@(windowId)];
 }
 
-- (NSString *)bridgeOriginForWindowId:(uint64_t)windowId sourceURL:(NSString *)sourceURL {
-    NSString *origin = self.bridgeOrigins[@(windowId)];
-    if (origin.length > 0) return origin;
-    return ZeroNativeOriginForURL([NSURL URLWithString:sourceURL]);
+- (NSString *)bridgeOriginForWindowId:(uint64_t)windowId webViewLabel:(NSString *)webViewLabel sourceURL:(NSString *)sourceURL {
+    NSURL *url = [NSURL URLWithString:sourceURL ?: @""];
+    NSString *label = webViewLabel.length > 0 ? webViewLabel : @"main";
+    NSString *assetOrigin = self.assetOrigins[@(windowId)];
+    if ([label isEqualToString:@"main"]) {
+        NSString *origin = self.bridgeOrigins[@(windowId)];
+        if (origin.length > 0) return origin;
+    } else if (assetOrigin.length > 0 && [self isInternalURL:url windowId:windowId]) {
+        return assetOrigin;
+    }
+    return ZeroNativeOriginForURL(url);
 }
 
 - (void)receiveBridgePayload:(NSString *)payload origin:(NSString *)origin windowId:(uint64_t)windowId webViewLabel:(NSString *)webViewLabel {
@@ -1394,6 +1583,11 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
     return hasCommand == needsCommand && hasControl == needsControl && hasOption == needsOption && shiftMatches;
 }
 
+static BOOL ZeroNativeWildcardPrefixHasPath(NSString *prefix) {
+    NSURLComponents *components = [NSURLComponents componentsWithString:prefix ?: @""];
+    return components.scheme.length > 0 && components.host.length > 0 && components.percentEncodedPath.length > 0;
+}
+
 static BOOL ZeroNativePolicyListMatches(NSArray<NSString *> *values, NSURL *url) {
     NSString *origin = ZeroNativeOriginForURL(url);
     NSString *absolute = url.absoluteString ?: @"";
@@ -1402,7 +1596,7 @@ static BOOL ZeroNativePolicyListMatches(NSArray<NSString *> *values, NSURL *url)
         if ([value isEqualToString:origin] || [value isEqualToString:absolute]) return YES;
         if ([value hasSuffix:@"*"]) {
             NSString *prefix = [value substringToIndex:value.length - 1];
-            if ([absolute hasPrefix:prefix] || [origin hasPrefix:prefix]) return YES;
+            if (ZeroNativeWildcardPrefixHasPath(prefix) && [absolute hasPrefix:prefix]) return YES;
         }
     }
     return NO;
@@ -1461,9 +1655,7 @@ bool ZeroNativeCefClient::OnProcessMessageReceived(CefRefPtr<CefBrowser> browser
     NSString *payloadString = [[NSString alloc] initWithBytes:payload.data() length:payload.size() encoding:NSUTF8StringEncoding] ?: @"{}";
     NSString *sourceURLString = [[NSString alloc] initWithBytes:source_url.data() length:source_url.size() encoding:NSUTF8StringEncoding] ?: @"";
     NSString *labelString = [[NSString alloc] initWithBytes:label.data() length:label.size() encoding:NSUTF8StringEncoding] ?: @"main";
-    NSString *originString = [labelString isEqualToString:@"main"]
-        ? [host_ bridgeOriginForWindowId:window_id_ sourceURL:sourceURLString]
-        : ZeroNativeOriginForURL([NSURL URLWithString:sourceURLString]);
+    NSString *originString = [host_ bridgeOriginForWindowId:window_id_ webViewLabel:labelString sourceURL:sourceURLString];
     [host_ receiveBridgePayload:payloadString origin:originString windowId:window_id_ webViewLabel:labelString];
     return true;
 }
@@ -1560,6 +1752,119 @@ void zero_native_appkit_set_security_policy(zero_native_appkit_host_t *host, con
     [object setAllowedNavigationOrigins:origins externalURLs:externalURLs externalAction:external_action];
 }
 
+void zero_native_appkit_set_menus(zero_native_appkit_host_t *host, const char *const *menu_titles, const size_t *menu_title_lens, size_t menu_count, const uint32_t *item_menu_indices, const char *const *item_labels, const size_t *item_label_lens, const char *const *item_commands, const size_t *item_command_lens, const char *const *item_keys, const size_t *item_key_lens, const uint32_t *item_modifiers, const int *item_separators, const int *item_enabled, const int *item_checked, size_t item_count) {
+    (void)host;
+    (void)menu_titles;
+    (void)menu_title_lens;
+    (void)menu_count;
+    (void)item_menu_indices;
+    (void)item_labels;
+    (void)item_label_lens;
+    (void)item_commands;
+    (void)item_command_lens;
+    (void)item_keys;
+    (void)item_key_lens;
+    (void)item_modifiers;
+    (void)item_separators;
+    (void)item_enabled;
+    (void)item_checked;
+    (void)item_count;
+}
+
+int zero_native_appkit_create_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *accessibility_label, size_t accessibility_label_len, const char *text, size_t text_len, const char *command, size_t command_len) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)kind;
+    (void)parent;
+    (void)parent_len;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    (void)layer;
+    (void)visible;
+    (void)enabled;
+    (void)role;
+    (void)role_len;
+    (void)accessibility_label;
+    (void)accessibility_label_len;
+    (void)text;
+    (void)text_len;
+    (void)command;
+    (void)command_len;
+    return 0;
+}
+
+int zero_native_appkit_update_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_accessibility_label, const char *accessibility_label, size_t accessibility_label_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)has_frame;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    (void)has_layer;
+    (void)layer;
+    (void)has_visible;
+    (void)visible;
+    (void)has_enabled;
+    (void)enabled;
+    (void)has_role;
+    (void)role;
+    (void)role_len;
+    (void)has_accessibility_label;
+    (void)accessibility_label;
+    (void)accessibility_label_len;
+    (void)has_text;
+    (void)text;
+    (void)text_len;
+    (void)has_command;
+    (void)command;
+    (void)command_len;
+    return 0;
+}
+
+int zero_native_appkit_set_view_frame(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    return 0;
+}
+
+int zero_native_appkit_set_view_visible(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, int visible) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)visible;
+    return 0;
+}
+
+int zero_native_appkit_focus_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    return 0;
+}
+
+int zero_native_appkit_close_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    return 0;
+}
+
 void zero_native_appkit_set_shortcuts(zero_native_appkit_host_t *host, const char *const *ids, const size_t *id_lens, const char *const *keys, const size_t *key_lens, const uint32_t *modifiers, size_t count) {
     ZeroNativeChromiumHost *object = (__bridge ZeroNativeChromiumHost *)host;
     [object setShortcutsWithIds:ids idLengths:id_lens keys:keys keyLengths:key_lens modifiers:modifiers count:count];
@@ -1625,20 +1930,141 @@ int zero_native_appkit_close_webview(zero_native_appkit_host_t *host, uint64_t w
 }
 
 size_t zero_native_appkit_clipboard_read(zero_native_appkit_host_t *host, char *buffer, size_t buffer_len) {
+    return zero_native_appkit_clipboard_read_data(host, "text/plain", strlen("text/plain"), buffer, buffer_len);
+}
+
+void zero_native_appkit_clipboard_write(zero_native_appkit_host_t *host, const char *text, size_t text_len) {
+    (void)zero_native_appkit_clipboard_write_data(host, "text/plain", strlen("text/plain"), text, text_len);
+}
+
+size_t zero_native_appkit_clipboard_read_data(zero_native_appkit_host_t *host, const char *mime_type, size_t mime_type_len, char *buffer, size_t buffer_len) {
     (void)host;
-    NSString *value = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString] ?: @"";
-    NSData *data = [value dataUsingEncoding:NSUTF8StringEncoding];
-    size_t count = MIN(buffer_len, data.length);
+    NSString *type = ZeroNativePasteboardTypeForMime(mime_type, mime_type_len);
+    if (!type || !buffer) return 0;
+    NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+    NSData *data = nil;
+    if ([type isEqualToString:NSPasteboardTypeString] || [type isEqualToString:NSPasteboardTypeHTML]) {
+        NSString *value = [pasteboard stringForType:type] ?: @"";
+        data = [value dataUsingEncoding:NSUTF8StringEncoding];
+    } else {
+        data = [pasteboard dataForType:type] ?: [NSData data];
+    }
+    if (data.length > buffer_len) return data.length;
+    size_t count = data.length;
     memcpy(buffer, data.bytes, count);
     return count;
 }
 
-void zero_native_appkit_clipboard_write(zero_native_appkit_host_t *host, const char *text, size_t text_len) {
+int zero_native_appkit_clipboard_write_data(zero_native_appkit_host_t *host, const char *mime_type, size_t mime_type_len, const char *bytes, size_t bytes_len) {
     (void)host;
-    NSString *value = [[NSString alloc] initWithBytes:text length:text_len encoding:NSUTF8StringEncoding] ?: @"";
+    NSString *type = ZeroNativePasteboardTypeForMime(mime_type, mime_type_len);
+    if (!type || (!bytes && bytes_len > 0)) return 0;
     NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
     [pasteboard clearContents];
-    [pasteboard setString:value forType:NSPasteboardTypeString];
+    if ([type isEqualToString:NSPasteboardTypeString] || [type isEqualToString:NSPasteboardTypeHTML]) {
+        NSString *value = [[NSString alloc] initWithBytes:bytes length:bytes_len encoding:NSUTF8StringEncoding] ?: @"";
+        return [pasteboard setString:value forType:type] ? 1 : 0;
+    }
+    NSData *data = [NSData dataWithBytes:bytes length:bytes_len];
+    return [pasteboard setData:data forType:type] ? 1 : 0;
+}
+
+int zero_native_appkit_show_notification(zero_native_appkit_host_t *host, const char *title, size_t title_len, const char *subtitle, size_t subtitle_len, const char *body, size_t body_len) {
+    (void)host;
+    NSString *titleString = title ? [[NSString alloc] initWithBytes:title length:title_len encoding:NSUTF8StringEncoding] : @"";
+    if (titleString.length == 0) return 0;
+    NSString *subtitleString = subtitle ? [[NSString alloc] initWithBytes:subtitle length:subtitle_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *bodyString = body ? [[NSString alloc] initWithBytes:body length:body_len encoding:NSUTF8StringEncoding] : @"";
+    NSUserNotification *notification = [[NSUserNotification alloc] init];
+    notification.title = titleString;
+    if (subtitleString.length > 0) notification.subtitle = subtitleString;
+    if (bodyString.length > 0) notification.informativeText = bodyString;
+    [[NSUserNotificationCenter defaultUserNotificationCenter] deliverNotification:notification];
+    return 1;
+}
+
+int zero_native_appkit_open_external_url(zero_native_appkit_host_t *host, const char *url, size_t url_len) {
+    (void)host;
+    NSString *urlString = url ? [[NSString alloc] initWithBytes:url length:url_len encoding:NSUTF8StringEncoding] : @"";
+    if (urlString.length == 0) return 0;
+    NSURL *target = [NSURL URLWithString:urlString];
+    if (!target || target.scheme.length == 0) return 0;
+    return [[NSWorkspace sharedWorkspace] openURL:target] ? 1 : 0;
+}
+
+int zero_native_appkit_reveal_path(zero_native_appkit_host_t *host, const char *path, size_t path_len) {
+    (void)host;
+    NSString *pathString = path ? [[NSString alloc] initWithBytes:path length:path_len encoding:NSUTF8StringEncoding] : @"";
+    if (pathString.length == 0) return 0;
+    NSURL *fileURL = [NSURL fileURLWithPath:pathString];
+    if (!fileURL) return 0;
+    [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ fileURL ]];
+    return 1;
+}
+
+int zero_native_appkit_add_recent_document(zero_native_appkit_host_t *host, const char *path, size_t path_len) {
+    (void)host;
+    NSString *pathString = path ? [[NSString alloc] initWithBytes:path length:path_len encoding:NSUTF8StringEncoding] : @"";
+    if (pathString.length == 0) return 0;
+    NSURL *fileURL = [NSURL fileURLWithPath:pathString];
+    if (!fileURL) return 0;
+    [[NSDocumentController sharedDocumentController] noteNewRecentDocumentURL:fileURL];
+    return 1;
+}
+
+int zero_native_appkit_clear_recent_documents(zero_native_appkit_host_t *host) {
+    (void)host;
+    [[NSDocumentController sharedDocumentController] clearRecentDocuments:nil];
+    return 1;
+}
+
+int zero_native_appkit_set_credential(zero_native_appkit_host_t *host, const char *service, size_t service_len, const char *account, size_t account_len, const char *secret, size_t secret_len) {
+    (void)host;
+    @autoreleasepool {
+        NSString *serviceString = ZeroNativeStringFromBytes(service, service_len);
+        NSString *accountString = ZeroNativeStringFromBytes(account, account_len);
+        if (serviceString.length == 0 || accountString.length == 0 || !secret || secret_len == 0) return 0;
+        NSData *secretData = [NSData dataWithBytes:secret length:secret_len];
+        NSMutableDictionary *query = ZeroNativeCredentialQuery(serviceString, accountString);
+        NSDictionary *update = @{ (__bridge id)kSecValueData: secretData };
+        OSStatus status = SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)update);
+        if (status == errSecItemNotFound) {
+            query[(__bridge id)kSecValueData] = secretData;
+            status = SecItemAdd((__bridge CFDictionaryRef)query, NULL);
+        }
+        return status == errSecSuccess ? 1 : 0;
+    }
+}
+
+size_t zero_native_appkit_get_credential(zero_native_appkit_host_t *host, const char *service, size_t service_len, const char *account, size_t account_len, char *buffer, size_t buffer_len) {
+    (void)host;
+    @autoreleasepool {
+        NSString *serviceString = ZeroNativeStringFromBytes(service, service_len);
+        NSString *accountString = ZeroNativeStringFromBytes(account, account_len);
+        if (serviceString.length == 0 || accountString.length == 0 || !buffer) return 0;
+        NSMutableDictionary *query = ZeroNativeCredentialQuery(serviceString, accountString);
+        query[(__bridge id)kSecReturnData] = @YES;
+        query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+        CFTypeRef result = NULL;
+        OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+        if (status != errSecSuccess || !result) return 0;
+        NSData *data = CFBridgingRelease(result);
+        if (data.length > buffer_len) return data.length;
+        memcpy(buffer, data.bytes, data.length);
+        return data.length;
+    }
+}
+
+int zero_native_appkit_delete_credential(zero_native_appkit_host_t *host, const char *service, size_t service_len, const char *account, size_t account_len) {
+    (void)host;
+    @autoreleasepool {
+        NSString *serviceString = ZeroNativeStringFromBytes(service, service_len);
+        NSString *accountString = ZeroNativeStringFromBytes(account, account_len);
+        if (serviceString.length == 0 || accountString.length == 0) return 0;
+        NSMutableDictionary *query = ZeroNativeCredentialQuery(serviceString, accountString);
+        OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
+        return status == errSecSuccess ? 1 : 0;
+    }
 }
 
 static NSArray<NSString *> *ZeroNativeParseExtensions(const char *extensions, size_t len) {
@@ -1651,6 +2077,10 @@ static NSArray<NSString *> *ZeroNativeParseExtensions(const char *extensions, si
         if (trimmed.length > 0) [result addObject:trimmed];
     }
     return result.count > 0 ? result : nil;
+}
+
+static size_t ZeroNativeOverflowSize(size_t buffer_len) {
+    return buffer_len == SIZE_MAX ? SIZE_MAX : buffer_len + 1;
 }
 
 static void ZeroNativeConfigurePanelExtensions(NSSavePanel *panel, NSArray<NSString *> *extensions) {
@@ -1685,18 +2115,22 @@ zero_native_appkit_open_dialog_result_t zero_native_appkit_show_open_dialog(zero
         if ([panel runModal] != NSModalResponseOK) return result;
 
         size_t offset = 0;
+        BOOL overflow = NO;
         for (NSURL *url in panel.URLs) {
             NSString *path = url.path;
             NSData *data = [path dataUsingEncoding:NSUTF8StringEncoding];
             if (!data) continue;
             size_t needed = data.length + (result.count > 0 ? 1 : 0);
-            if (offset + needed > buffer_len) break;
+            if (needed > buffer_len - offset) {
+                overflow = YES;
+                break;
+            }
             if (result.count > 0) { buffer[offset] = '\n'; offset++; }
             memcpy(buffer + offset, data.bytes, data.length);
             offset += data.length;
             result.count++;
         }
-        result.bytes_written = offset;
+        result.bytes_written = overflow ? ZeroNativeOverflowSize(buffer_len) : offset;
     }
     return result;
 }
@@ -1722,7 +2156,8 @@ size_t zero_native_appkit_show_save_dialog(zero_native_appkit_host_t *host, cons
         NSString *path = panel.URL.path;
         NSData *data = [path dataUsingEncoding:NSUTF8StringEncoding];
         if (!data) return 0;
-        size_t count = MIN(buffer_len, data.length);
+        size_t count = data.length;
+        if (count > buffer_len) return ZeroNativeOverflowSize(buffer_len);
         memcpy(buffer, data.bytes, count);
         return count;
     }

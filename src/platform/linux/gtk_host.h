@@ -17,6 +17,11 @@ typedef enum {
     ZERO_NATIVE_GTK_EVENT_RESIZE = 3,
     ZERO_NATIVE_GTK_EVENT_WINDOW_FRAME = 4,
     ZERO_NATIVE_GTK_EVENT_SHORTCUT = 5,
+    ZERO_NATIVE_GTK_EVENT_NATIVE_COMMAND = 6,
+    ZERO_NATIVE_GTK_EVENT_APP_ACTIVATED = 7,
+    ZERO_NATIVE_GTK_EVENT_APP_DEACTIVATED = 8,
+    ZERO_NATIVE_GTK_EVENT_MENU_COMMAND = 9,
+    ZERO_NATIVE_GTK_EVENT_FILES_DROPPED = 10,
 } zero_native_gtk_event_kind_t;
 
 typedef struct {
@@ -38,6 +43,12 @@ typedef struct {
     const char *shortcut_key;
     size_t shortcut_key_len;
     uint32_t shortcut_modifiers;
+    const char *command_name;
+    size_t command_name_len;
+    const char *view_label;
+    size_t view_label_len;
+    const char *drop_paths;
+    size_t drop_paths_len;
 } zero_native_gtk_event_t;
 
 typedef void (*zero_native_gtk_event_callback_t)(void *context, const zero_native_gtk_event_t *event);
@@ -98,18 +109,36 @@ void zero_native_gtk_bridge_respond_window(zero_native_gtk_host_t *host, uint64_
 void zero_native_gtk_bridge_respond_webview(zero_native_gtk_host_t *host, uint64_t window_id, const char *webview_label, size_t webview_label_len, const char *response, size_t response_len);
 void zero_native_gtk_emit_window_event(zero_native_gtk_host_t *host, uint64_t window_id, const char *name, size_t name_len, const char *detail_json, size_t detail_json_len);
 void zero_native_gtk_set_security_policy(zero_native_gtk_host_t *host, const char *allowed_origins, size_t allowed_origins_len, const char *external_urls, size_t external_urls_len, int external_action);
+void zero_native_gtk_set_menus(zero_native_gtk_host_t *host, const char *const *menu_titles, const size_t *menu_title_lens, size_t menu_count, const uint32_t *item_menu_indices, const char *const *item_labels, const size_t *item_label_lens, const char *const *item_commands, const size_t *item_command_lens, const char *const *item_keys, const size_t *item_key_lens, const uint32_t *item_modifiers, const int *item_separators, const int *item_enabled, const int *item_checked, size_t item_count);
 void zero_native_gtk_set_shortcuts(zero_native_gtk_host_t *host, const char *const *ids, const size_t *id_lens, const char *const *keys, const size_t *key_lens, const uint32_t *modifiers, size_t count);
 int zero_native_gtk_create_window(zero_native_gtk_host_t *host, uint64_t window_id, const char *window_title, size_t window_title_len, const char *window_label, size_t window_label_len, double x, double y, double width, double height, int restore_frame);
 int zero_native_gtk_focus_window(zero_native_gtk_host_t *host, uint64_t window_id);
 int zero_native_gtk_close_window(zero_native_gtk_host_t *host, uint64_t window_id);
+int zero_native_gtk_create_view(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *accessibility_label, size_t accessibility_label_len, const char *text, size_t text_len, const char *command, size_t command_len);
+int zero_native_gtk_update_view(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_accessibility_label, const char *accessibility_label, size_t accessibility_label_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len);
+int zero_native_gtk_set_view_frame(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height);
+int zero_native_gtk_set_view_visible(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int visible);
+int zero_native_gtk_focus_view(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len);
+int zero_native_gtk_close_view(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len);
 int zero_native_gtk_create_webview(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, const char *url, size_t url_len, double x, double y, double width, double height, int layer, int transparent, int bridge_enabled);
 int zero_native_gtk_set_webview_frame(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height);
 int zero_native_gtk_navigate_webview(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, const char *url, size_t url_len);
 int zero_native_gtk_set_webview_zoom(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, double zoom);
 int zero_native_gtk_set_webview_layer(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int layer);
 int zero_native_gtk_close_webview(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len);
+int zero_native_gtk_open_external_url(zero_native_gtk_host_t *host, const char *url, size_t url_len);
+int zero_native_gtk_reveal_path(zero_native_gtk_host_t *host, const char *path, size_t path_len);
+int zero_native_gtk_show_notification(zero_native_gtk_host_t *host, const char *title, size_t title_len, const char *subtitle, size_t subtitle_len, const char *body, size_t body_len);
+int zero_native_gtk_add_recent_document(zero_native_gtk_host_t *host, const char *path, size_t path_len);
+int zero_native_gtk_clear_recent_documents(zero_native_gtk_host_t *host);
+int zero_native_gtk_credentials_available(zero_native_gtk_host_t *host);
+int zero_native_gtk_set_credential(zero_native_gtk_host_t *host, const char *service, size_t service_len, const char *account, size_t account_len, const char *secret, size_t secret_len);
+size_t zero_native_gtk_get_credential(zero_native_gtk_host_t *host, const char *service, size_t service_len, const char *account, size_t account_len, char *buffer, size_t buffer_len);
+int zero_native_gtk_delete_credential(zero_native_gtk_host_t *host, const char *service, size_t service_len, const char *account, size_t account_len);
 size_t zero_native_gtk_clipboard_read(zero_native_gtk_host_t *host, char *buffer, size_t buffer_len);
 void zero_native_gtk_clipboard_write(zero_native_gtk_host_t *host, const char *text, size_t text_len);
+size_t zero_native_gtk_clipboard_read_data(zero_native_gtk_host_t *host, const char *mime_type, size_t mime_type_len, char *buffer, size_t buffer_len);
+int zero_native_gtk_clipboard_write_data(zero_native_gtk_host_t *host, const char *mime_type, size_t mime_type_len, const char *bytes, size_t bytes_len);
 zero_native_gtk_open_dialog_result_t zero_native_gtk_show_open_dialog(zero_native_gtk_host_t *host, const zero_native_gtk_open_dialog_opts_t *opts, char *buffer, size_t buffer_len);
 size_t zero_native_gtk_show_save_dialog(zero_native_gtk_host_t *host, const zero_native_gtk_save_dialog_opts_t *opts, char *buffer, size_t buffer_len);
 int zero_native_gtk_show_message_dialog(zero_native_gtk_host_t *host, const zero_native_gtk_message_dialog_opts_t *opts);

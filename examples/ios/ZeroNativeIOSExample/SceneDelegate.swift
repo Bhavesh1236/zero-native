@@ -14,4 +14,12 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.makeKeyAndVisible()
         self.window = window
     }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        (window?.rootViewController as? ZeroNativeHostViewController)?.activateNativeApp()
+    }
+
+    func sceneWillResignActive(_ scene: UIScene) {
+        (window?.rootViewController as? ZeroNativeHostViewController)?.deactivateNativeApp()
+    }
 }

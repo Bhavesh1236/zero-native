@@ -37,12 +37,13 @@ const SigningMode = enum {
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
+    const host_target = b.graph.host;
     const optimize = b.standardOptimizeOption(.{});
     const platform_option = b.option(PlatformOption, "platform", "Desktop backend: auto, null, macos, linux, windows") orelse .auto;
     const trace_option = b.option(TraceOption, "trace", "Trace output: off, events, runtime, all") orelse .events;
     _ = b.option(bool, "debug-overlay", "Enable debug overlay output") orelse false;
     _ = b.option(bool, "automation", "Enable zero-native automation artifacts") orelse false;
-    _ = b.option(bool, "webview", "Deprecated: WebView is the only runtime surface") orelse true;
+    _ = b.option(bool, "webview", "Deprecated compatibility flag; native surfaces are always enabled") orelse true;
     const web_engine_override = b.option(WebEngineOption, "web-engine", "Override app.zon web engine: system, chromium");
     const cef_dir_override = b.option([]const u8, "cef-dir", "Override CEF root directory for Chromium builds");
     const cef_auto_install_override = b.option(bool, "cef-auto-install", "Override app.zon CEF auto-install setting");
@@ -78,8 +79,8 @@ pub fn build(b: *std.Build) void {
     if (selected_platform == .windows and target.result.os.tag != .windows) {
         @panic("-Dplatform=windows requires a Windows target");
     }
-    if (web_engine == .chromium and selected_platform == .null) {
-        @panic("-Dweb-engine=chromium requires -Dplatform=macos, linux, or windows");
+    if (web_engine == .chromium and selected_platform != .macos) {
+        @panic("-Dweb-engine=chromium currently requires -Dplatform=macos");
     }
 
     const geometry_mod = module(b, target, optimize, "src/primitives/geometry/root.zig");
@@ -116,12 +117,16 @@ pub fn build(b: *std.Build) void {
         "zero_native_app_create",
         "zero_native_app_destroy",
         "zero_native_app_start",
+        "zero_native_app_activate",
+        "zero_native_app_deactivate",
         "zero_native_app_stop",
         "zero_native_app_resize",
         "zero_native_app_touch",
+        "zero_native_app_command",
         "zero_native_app_frame",
         "zero_native_app_set_asset_root",
         "zero_native_app_last_command_count",
+        "zero_native_app_last_command_name",
         "zero_native_app_last_error_name",
     };
     const desktop_tests = testArtifact(b, desktop_mod);
@@ -134,6 +139,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(embed_lib);
 
     const automation_protocol_mod = module(b, target, optimize, "src/automation/protocol.zig");
+    const automation_protocol_tests = testArtifact(b, automation_protocol_mod);
     const tooling_mod = module(b, target, optimize, "src/tooling/root.zig");
     tooling_mod.addImport("assets", assets_mod);
     tooling_mod.addImport("app_dirs", app_dirs_mod);
@@ -153,6 +159,37 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(cli_exe);
 
+    const host_assets_mod = module(b, host_target, optimize, "src/primitives/assets/root.zig");
+    const host_app_dirs_mod = module(b, host_target, optimize, "src/primitives/app_dirs/root.zig");
+    const host_app_manifest_mod = module(b, host_target, optimize, "src/primitives/app_manifest/root.zig");
+    const host_diagnostics_mod = module(b, host_target, optimize, "src/primitives/diagnostics/root.zig");
+    const host_platform_info_mod = module(b, host_target, optimize, "src/primitives/platform_info/root.zig");
+    const host_trace_mod = module(b, host_target, optimize, "src/primitives/trace/root.zig");
+    const host_debug_mod = module(b, host_target, optimize, "src/debug/root.zig");
+    host_debug_mod.addImport("app_dirs", host_app_dirs_mod);
+    host_debug_mod.addImport("trace", host_trace_mod);
+    const host_automation_protocol_mod = module(b, host_target, optimize, "src/automation/protocol.zig");
+    const host_tooling_mod = module(b, host_target, optimize, "src/tooling/root.zig");
+    host_tooling_mod.addImport("assets", host_assets_mod);
+    host_tooling_mod.addImport("app_dirs", host_app_dirs_mod);
+    host_tooling_mod.addImport("app_manifest", host_app_manifest_mod);
+    host_tooling_mod.addImport("diagnostics", host_diagnostics_mod);
+    host_tooling_mod.addImport("debug", host_debug_mod);
+    host_tooling_mod.addImport("platform_info", host_platform_info_mod);
+    host_tooling_mod.addImport("trace", host_trace_mod);
+    const host_cli_mod = module(b, host_target, optimize, "tools/zero-native/main.zig");
+    host_cli_mod.addImport("tooling", host_tooling_mod);
+    host_cli_mod.addImport("automation_protocol", host_automation_protocol_mod);
+    const host_cli_exe = b.addExecutable(.{
+        .name = "zero-native",
+        .root_module = host_cli_mod,
+    });
+    const file_contains_checker_mod = module(b, host_target, optimize, "tools/check_file_contains.zig");
+    const file_contains_checker = b.addExecutable(.{
+        .name = "check-file-contains",
+        .root_module = file_contains_checker_mod,
+    });
+
     const platform_arg = switch (selected_platform) {
         .auto => unreachable,
         .null => "null",
@@ -171,7 +208,87 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(platform_info_tests).step);
     test_step.dependOn(&b.addRunArtifact(json_tests).step);
     test_step.dependOn(&b.addRunArtifact(desktop_tests).step);
+    test_step.dependOn(&b.addRunArtifact(automation_protocol_tests).step);
     test_step.dependOn(&b.addRunArtifact(tooling_tests).step);
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-package-types", "Verify package TypeScript platform feature names", &.{
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "ZeroNativeCommandInfo" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "list(): Promise<ZeroNativeCommandInfo[]>" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "ZeroNativeCreateWebViewViewOptions" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "Stable runtime view id" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "update(label: string" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "focus(options: string | ZeroNativeViewSelector)" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "close(options: string | ZeroNativeViewSelector)" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "kind: \"webview\"" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "url: string" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "ZeroNativePlatformFeatureSelector" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "supports(value: ZeroNativePlatformFeature | ZeroNativePlatformFeatureSelector)" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "\"native_control_commands\"" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "\"nativeControlCommands\"" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "\"recent_documents\"" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "\"recentDocuments\"" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "\"file_drops\"" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "\"fileDrops\"" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "\"app_activation_events\"" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "\"appActivationEvents\"" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "\"gpu_surfaces\"" },
+        .{ .path = "packages/zero-native/zero-native.d.ts", .pattern = "\"gpuSurfaces\"" },
+    });
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-bridge-view-selector-helpers", "Verify injected view helpers accept string selectors", &.{
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "viewSelectorPayload(options)" },
+        .{ .path = "src/platform/macos/cef_host.mm", .pattern = "viewSelectorPayload(options)" },
+        .{ .path = "src/platform/linux/gtk_host.c", .pattern = "viewSelectorPayload(options)" },
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "viewSelectorPayload(options)" },
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "focus:function(options){return invoke('zero-native.view.focus',viewSelectorPayload(options))" },
+        .{ .path = "src/platform/macos/cef_host.mm", .pattern = "focus:function(options){return invoke('zero-native.view.focus',viewSelectorPayload(options))" },
+        .{ .path = "src/platform/linux/gtk_host.c", .pattern = "focus:function(options){return invoke('zero-native.view.focus',viewSelectorPayload(options))" },
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "focus:function(options){return invoke('zero-native.view.focus',viewSelectorPayload(options))" },
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "close:function(options){return invoke('zero-native.view.close',viewSelectorPayload(options))" },
+        .{ .path = "src/platform/macos/cef_host.mm", .pattern = "close:function(options){return invoke('zero-native.view.close',viewSelectorPayload(options))" },
+        .{ .path = "src/platform/linux/gtk_host.c", .pattern = "close:function(options){return invoke('zero-native.view.close',viewSelectorPayload(options))" },
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "close:function(options){return invoke('zero-native.view.close',viewSelectorPayload(options))" },
+    });
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-docs-command-contracts", "Verify command docs match native view update contracts", &.{
+        .{ .path = "docs/src/app/commands/page.mdx", .pattern = ".text = \"Refreshed\"" },
+        .{ .path = "docs/src/app/commands/page.mdx", .pattern = "const commands = await window.zero.commands.list();" },
+    });
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-docs-native-view-contracts", "Verify native surface docs describe view identity", &.{
+        .{ .path = "docs/src/app/native-surfaces/page.mdx", .pattern = "ViewInfo.id" },
+        .{ .path = "docs/src/app/native-surfaces/page.mdx", .pattern = "window.zero.views.update(\"status\"" },
+    });
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-docs-shell-manifest-contracts", "Verify app.zon docs describe shell compatibility window labels", &.{
+        .{ .path = "docs/src/app/app-zon/page.mdx", .pattern = "labels must stay unique across both lists" },
+    });
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-js-view-helper-contracts", "Verify injected view helpers support label-first updates", &.{
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "update:function(options,patch)" },
+        .{ .path = "src/platform/macos/cef_host.mm", .pattern = "update:function(options,patch)" },
+        .{ .path = "src/platform/linux/gtk_host.c", .pattern = "update:function(options,patch)" },
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "update:function(options,patch)" },
+    });
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-windows-packaged-assets-webview2", "Verify Windows packaged assets are served through WebView2 request interception", &.{
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "constexpr const char *kAssetVirtualOrigin = \"https://zero-native-app.localhost\";" },
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "return virtualAssetEntryUrl(webview.asset_entry);" },
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "AddWebResourceRequestedFilter(L\"https://zero-native-app.localhost/*\"" },
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "assetWebResourceResponse(environment_ref.Get(), found->second, uri)" },
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "bridgeOriginForWebViewUrl(source_webview->second, source_url)" },
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "webview.spa_fallback = spa_fallback != 0;" },
+    });
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-macos-cef-packaged-assets-webviews", "Verify macOS CEF child WebViews resolve packaged asset URLs before loading", &.{
+        .{ .path = "src/platform/macos/cef_host.mm", .pattern = "self.assetRoots = [[NSMutableDictionary alloc] init];" },
+        .{ .path = "src/platform/macos/cef_host.mm", .pattern = "resolvedWebViewURLString:(NSString *)url windowId:(uint64_t)windowId" },
+        .{ .path = "src/platform/macos/cef_host.mm", .pattern = "CefBrowserHost::CreateBrowser(windowInfo, client.get(), std::string(resolvedURL.UTF8String)" },
+        .{ .path = "src/platform/macos/cef_host.mm", .pattern = "self.webviewPendingURLs[[self webViewKeyForWindow:windowId label:label]] = resolvedURL;" },
+        .{ .path = "src/platform/macos/cef_host.mm", .pattern = "bridgeOriginForWindowId:window_id_ webViewLabel:labelString sourceURL:sourceURLString" },
+    });
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-appkit-native-accessibility-roles", "Verify AppKit native views publish accessibility roles", &.{
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "ZeroNativeAccessibilityRoleForNativeViewKind" },
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "NSAccessibilityToolbarRole" },
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "NSAccessibilityProgressIndicatorRole" },
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "view.accessibilityRole = ZeroNativeAccessibilityRoleForNativeViewKind(kind)" },
+    });
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-docs-builtin-bridge-policy", "Verify bridge policy docs include guarded dialog commands", &.{
+        .{ .path = "docs/src/app/security/page.mdx", .pattern = ".{ .name = \"zero-native.dialog.saveFile\"" },
+        .{ .path = "docs/src/app/bridge/builtin-commands/page.mdx", .pattern = ".{ .name = \"zero-native.dialog.saveFile\"" },
+    });
 
     addTestStep(b, "test-geometry", "Run geometry module tests", geometry_tests);
     addTestStep(b, "test-assets", "Run assets module tests", assets_tests);
@@ -182,6 +299,7 @@ pub fn build(b: *std.Build) void {
     addTestStep(b, "test-platform-info", "Run platform info module tests", platform_info_tests);
     addTestStep(b, "test-json", "Run JSON primitive tests", json_tests);
     addTestStep(b, "test-desktop", "Run zero-native framework tests", desktop_tests);
+    addTestStep(b, "test-automation-protocol", "Run automation protocol tests", automation_protocol_tests);
     addTestStep(b, "test-tooling", "Run zero-native tooling tests", tooling_tests);
 
     const run_hello = b.addSystemCommand(&.{ "zig", "build", "run", b.fmt("-Dplatform={s}", .{platform_arg}), b.fmt("-Dtrace={s}", .{@tagName(trace_option)}) });
@@ -215,6 +333,21 @@ pub fn build(b: *std.Build) void {
     addExampleTestStep(b, frontend_examples_step, "test-example-react", "Run React example tests", "examples/react");
     addExampleTestStep(b, frontend_examples_step, "test-example-svelte", "Run Svelte example tests", "examples/svelte");
     addExampleTestStep(b, frontend_examples_step, "test-example-vue", "Run Vue example tests", "examples/vue");
+    addFileContainsCheckStep(b, file_contains_checker, frontend_examples_step, "test-example-frontend-positioning", "Verify frontend example native shell positioning", &.{
+        .{ .path = "examples/next/README.md", .pattern = "opens the native app shell with WebView content." },
+        .{ .path = "examples/react/README.md", .pattern = "opens the native app shell with WebView content." },
+        .{ .path = "examples/svelte/README.md", .pattern = "opens the native app shell with WebView content." },
+        .{ .path = "examples/vue/README.md", .pattern = "opens the native app shell with WebView content." },
+    });
+
+    const native_examples_step = b.step("test-examples-native", "Run native-first example tests");
+    addExampleTestStep(b, native_examples_step, "test-example-command-app", "Run command app example tests", "examples/command-app");
+    addExampleTestStep(b, native_examples_step, "test-example-native-shell", "Run native shell example tests", "examples/native-shell");
+    addExampleTestStep(b, native_examples_step, "test-example-native-panels", "Run native panels example tests", "examples/native-panels");
+    addExampleTestStep(b, native_examples_step, "test-example-capabilities", "Run capabilities example tests", "examples/capabilities");
+    addFileContainsCheckStep(b, file_contains_checker, native_examples_step, "test-example-capabilities-events", "Verify capabilities example event bridge names", &.{
+        .{ .path = "examples/capabilities/src/main.zig", .pattern = "zero-native:drop:files" },
+    });
 
     const mobile_examples_step = b.step("test-examples-mobile", "Verify mobile example project layouts");
     addLayoutCheckStep(b, mobile_examples_step, "test-example-ios-layout", "Verify iOS example layout", &.{
@@ -238,6 +371,31 @@ pub fn build(b: *std.Build) void {
         "examples/android/app/src/main/cpp/zero_native_jni.c",
         "examples/android/app/src/main/cpp/zero_native.h",
     });
+    addLayoutCheckStep(b, mobile_examples_step, "test-example-mobile-shell-layout", "Verify shared mobile-shell metadata", &.{
+        "examples/mobile-shell/README.md",
+        "examples/mobile-shell/app.zon",
+    });
+    addFileContainsCheckStep(b, file_contains_checker, mobile_examples_step, "test-example-mobile-shell-metadata", "Verify shared mobile-shell metadata values", &.{
+        .{ .path = "examples/mobile-shell/app.zon", .pattern = ".platforms = .{ \"ios\", \"android\" }" },
+        .{ .path = "examples/mobile-shell/app.zon", .pattern = ".capabilities = .{ \"webview\", \"native_views\", \"native_module\" }" },
+        .{ .path = "examples/mobile-shell/app.zon", .pattern = ".id = \"mobile.back\"" },
+        .{ .path = "examples/mobile-shell/app.zon", .pattern = ".id = \"mobile.refresh\"" },
+        .{ .path = "examples/mobile-shell/app.zon", .pattern = ".label = \"mobile-header\"" },
+        .{ .path = "examples/mobile-shell/app.zon", .pattern = ".label = \"workspace\", .kind = \"webview\"" },
+    });
+    addFileContainsCheckStep(b, file_contains_checker, mobile_examples_step, "test-example-mobile-host-commands", "Verify mobile host command metadata values", &.{
+        .{ .path = "examples/ios/app.zon", .pattern = ".id = \"mobile.back\"" },
+        .{ .path = "examples/ios/app.zon", .pattern = ".id = \"mobile.refresh\"" },
+        .{ .path = "examples/ios/app.zon", .pattern = ".label = \"mobile-header\"" },
+        .{ .path = "examples/android/app.zon", .pattern = ".id = \"mobile.back\"" },
+        .{ .path = "examples/android/app.zon", .pattern = ".id = \"mobile.refresh\"" },
+        .{ .path = "examples/android/app.zon", .pattern = ".label = \"mobile-header\"" },
+    });
+
+    const examples_step = b.step("test-examples", "Run all example tests and layout checks");
+    examples_step.dependOn(frontend_examples_step);
+    examples_step.dependOn(native_examples_step);
+    examples_step.dependOn(mobile_examples_step);
 
     const build_webview_cef = b.addSystemCommand(&.{ "zig", "build", "-Dplatform=macos", "-Dweb-engine=chromium", b.fmt("-Dcef-dir={s}", .{cef_dir}) });
     build_webview_cef.setCwd(b.path("examples/webview"));
@@ -301,6 +459,142 @@ pub fn build(b: *std.Build) void {
     webview_smoke_run.step.dependOn(&webview_smoke_build.step);
     webview_smoke_run.step.dependOn(&cli_exe.step);
     webview_smoke_step.dependOn(&webview_smoke_run.step);
+
+    const native_shell_smoke_step = b.step("test-native-shell-smoke", "Run macOS native-shell automation smoke test");
+    const native_shell_smoke_build = b.addSystemCommand(&.{ "zig", "build", "-Dplatform=macos", "-Dweb-engine=system", "-Dautomation=true", "-Djs-bridge=true" });
+    native_shell_smoke_build.setCwd(b.path("examples/native-shell"));
+    const native_shell_smoke_run = b.addSystemCommand(&.{
+        "sh", "-c",
+        \\set -eu
+        \\cd examples/native-shell
+        \\app="zig-out/bin/native-shell"
+        \\cli="$1"
+        \\case "$cli" in /*) ;; *) cli="../../$cli" ;; esac
+        \\automation_dir=".zig-cache/zero-native-automation"
+        \\response_file="$automation_dir/bridge-response.txt"
+        \\mkdir -p "$automation_dir"
+        \\rm -f "$automation_dir/snapshot.txt" "$automation_dir/accessibility.txt" "$automation_dir/windows.txt" "$automation_dir/command.txt" "$response_file"
+        \\"$app" > .zig-cache/zero-native-native-shell-smoke.log 2>&1 &
+        \\pid=$!
+        \\trap 'kill "$pid" >/dev/null 2>&1 || true; wait "$pid" >/dev/null 2>&1 || true' EXIT
+        \\ready="$("$cli" automate wait 2>&1)"
+        \\case "$ready" in *"ready=true"*) ;; *) echo "native-shell automation snapshot was not ready" >&2; exit 1 ;; esac
+        \\snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\case "$snapshot" in *'window @w1 "zero-native Native Shell"'*) ;; *) echo "native-shell window was missing from snapshot" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/toolbar kind=toolbar'*) ;; *) echo "toolbar view was missing from snapshot" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/sidebar kind=sidebar'*) ;; *) echo "sidebar view was missing from snapshot" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/main kind=webview'*) ;; *) echo "main WebView was missing from snapshot" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/statusbar kind=statusbar'*) ;; *) echo "statusbar view was missing from snapshot" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/refresh-icon kind=icon_button'*'accessibility_label="Refresh workspace"'*) ;; *) echo "refresh icon accessibility metadata was missing from snapshot" >&2; exit 1 ;; esac
+        \\"$cli" automate focus refresh-button >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  focus_line="$(printf '%s\n' "$snapshot" | grep -F 'view @w1/refresh-button kind=button' || true)"
+        \\  case "$focus_line" in *'focused=true'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$focus_line" in *'focused=true'*) ;; *) echo "native-shell refresh button did not receive focus" >&2; exit 1 ;; esac
+        \\"$cli" automate focus-next >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  focus_line="$(printf '%s\n' "$snapshot" | grep -F 'view @w1/palette-button kind=button' || true)"
+        \\  case "$focus_line" in *'focused=true'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$focus_line" in *'focused=true'*) ;; *) echo "native-shell focus-next did not move focus to palette button" >&2; exit 1 ;; esac
+        \\"$cli" automate focus-previous >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  focus_line="$(printf '%s\n' "$snapshot" | grep -F 'view @w1/refresh-button kind=button' || true)"
+        \\  case "$focus_line" in *'focused=true'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$focus_line" in *'focused=true'*) ;; *) echo "native-shell focus-previous did not return focus to refresh button" >&2; exit 1 ;; esac
+        \\"$cli" automate resize 900 640 >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  case "$snapshot" in *'window @w1 "zero-native Native Shell" bounds=('*' 900x640)'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$snapshot" in *'window @w1 "zero-native Native Shell" bounds=('*' 900x640)'*) ;; *) echo "native-shell window resize was not reflected in snapshot" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/toolbar kind=toolbar'*'bounds=(0,0 900x52)'*) ;; *) echo "native-shell toolbar did not relayout after resize" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/main kind=webview'*'bounds=(240,52 660x548)'*) ;; *) echo "native-shell main WebView did not relayout after resize" >&2; exit 1 ;; esac
+        \\case "$snapshot" in *'view @w1/statusbar kind=statusbar'*'bounds=(240,600 660x40)'*) ;; *) echo "native-shell statusbar did not relayout after resize" >&2; exit 1 ;; esac
+        \\rm -f "$response_file"
+        \\printf 'bridge %s\n' '{"id":"native-shell-refresh","command":"zero-native.command.invoke","payload":{"name":"app.refresh"}}' > "$automation_dir/command.txt"
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ] && [ ! -s "$response_file" ]; do attempts=$((attempts + 1)); sleep 0.1; done
+        \\response="$(cat "$response_file" 2>/dev/null || true)"
+        \\case "$response" in *'"ok":true'*'"name":"app.refresh"'*'"source":"bridge"'*) ;; *) echo "native-shell command bridge did not succeed: $response" >&2; exit 1 ;; esac
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  case "$snapshot" in *'Refreshed from bridge. Count 1.'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$snapshot" in *'view @w1/status-label kind=label'*'Refreshed from bridge. Count 1.'*) ;; *) echo "native-shell status view did not reflect bridge refresh" >&2; exit 1 ;; esac
+        \\"$cli" automate menu-command app.refresh >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  case "$snapshot" in *'Refreshed from menu. Count 2.'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$snapshot" in *'view @w1/status-label kind=label'*'Refreshed from menu. Count 2.'*) ;; *) echo "native-shell menu command did not update status" >&2; exit 1 ;; esac
+        \\"$cli" automate native-command app.refresh refresh-button >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  case "$snapshot" in *'Refreshed from toolbar. Count 3.'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$snapshot" in *'view @w1/status-label kind=label'*'Refreshed from toolbar. Count 3.'*) ;; *) echo "native-shell toolbar command did not update status" >&2; exit 1 ;; esac
+        \\"$cli" automate shortcut app.refresh >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  case "$snapshot" in *'Refreshed from shortcut. Count 4.'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$snapshot" in *'view @w1/status-label kind=label'*'Refreshed from shortcut. Count 4.'*) ;; *) echo "native-shell shortcut command did not update status" >&2; exit 1 ;; esac
+        \\"$cli" automate menu-command app.preview.open >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  case "$snapshot" in *'view @w1/preview kind=webview'*'bounds=(520,96 320x220)'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$snapshot" in *'view @w1/preview kind=webview'*'bounds=(520,96 320x220)'*) ;; *) echo "native-shell preview WebView was not created" >&2; exit 1 ;; esac
+        \\"$cli" automate menu-command app.preview.close >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  case "$snapshot" in *'view @w1/preview kind=webview'*) ;; *) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$snapshot" in *'view @w1/preview kind=webview'*) echo "native-shell preview WebView was not closed" >&2; exit 1 ;; *) ;; esac
+        \\echo "native-shell smoke ok"
+        ,
+        "sh",
+    });
+    native_shell_smoke_run.addFileArg(cli_exe.getEmittedBin());
+    native_shell_smoke_run.step.dependOn(&native_shell_smoke_build.step);
+    native_shell_smoke_run.step.dependOn(&cli_exe.step);
+    native_shell_smoke_step.dependOn(&native_shell_smoke_run.step);
 
     const webview_cef_smoke_step = b.step("test-webview-cef-smoke", "Run macOS Chromium WebView automation smoke test");
     const webview_cef_smoke_build = b.addSystemCommand(&.{ "zig", "build", "-Dplatform=macos", "-Dweb-engine=chromium", b.fmt("-Dcef-dir={s}", .{cef_dir}), "-Dautomation=true", "-Djs-bridge=true" });
@@ -367,22 +661,22 @@ pub fn build(b: *std.Build) void {
     const lib_step = b.step("lib", "Build zero-native embeddable static library");
     lib_step.dependOn(&b.addInstallArtifact(embed_lib, .{}).step);
 
-    const doctor_run = b.addRunArtifact(cli_exe);
+    const doctor_run = b.addRunArtifact(host_cli_exe);
     doctor_run.addArg("doctor");
     const doctor_step = b.step("doctor", "Print zero-native platform diagnostics");
     doctor_step.dependOn(&doctor_run.step);
 
-    const validate_run = b.addRunArtifact(cli_exe);
+    const validate_run = b.addRunArtifact(host_cli_exe);
     validate_run.addArgs(&.{ "validate", "app.zon" });
     const validate_step = b.step("validate", "Validate app.zon");
     validate_step.dependOn(&validate_run.step);
 
-    const bundle_run = b.addRunArtifact(cli_exe);
+    const bundle_run = b.addRunArtifact(host_cli_exe);
     bundle_run.addArgs(&.{ "bundle-assets", "app.zon", "assets", "zig-out/assets" });
     const bundle_step = b.step("bundle-assets", "Bundle app assets");
     bundle_step.dependOn(&bundle_run.step);
 
-    const package_run = b.addRunArtifact(cli_exe);
+    const package_run = b.addRunArtifact(host_cli_exe);
     package_run.addArgs(&.{
         "package",
         "--target",
@@ -399,7 +693,7 @@ pub fn build(b: *std.Build) void {
     const package_step = b.step("package", "Create local package artifact");
     package_step.dependOn(&package_run.step);
 
-    const package_cef_run = b.addRunArtifact(cli_exe);
+    const package_cef_run = b.addRunArtifact(host_cli_exe);
     package_cef_run.addArgs(&.{
         "package",
         "--target",
@@ -430,27 +724,23 @@ pub fn build(b: *std.Build) void {
     const package_cef_smoke_step = b.step("test-package-cef-layout", "Verify macOS Chromium package layout");
     package_cef_smoke_step.dependOn(&package_cef_check.step);
 
-    const package_windows_run = b.addRunArtifact(cli_exe);
+    const package_windows_run = b.addRunArtifact(host_cli_exe);
     package_windows_run.addArgs(&.{ "package-windows", "--output", b.fmt("zig-out/package/zero-native-{s}-windows-Debug", .{package_version}), "--manifest", "app.zon", "--assets", "assets" });
     const package_windows_step = b.step("package-windows", "Create local Windows artifact directory");
     package_windows_step.dependOn(&package_windows_run.step);
 
-    const package_linux_run = b.addRunArtifact(cli_exe);
+    const package_linux_run = b.addRunArtifact(host_cli_exe);
     package_linux_run.addArgs(&.{ "package-linux", "--output", b.fmt("zig-out/package/zero-native-{s}-linux-Debug", .{package_version}), "--manifest", "app.zon", "--assets", "assets" });
     const package_linux_step = b.step("package-linux", "Create local Linux artifact directory");
     package_linux_step.dependOn(&package_linux_run.step);
 
-    const package_ios_run = b.addRunArtifact(cli_exe);
-    package_ios_run.addArgs(&.{ "package-ios", "--output", b.fmt("zig-out/mobile/zero-native-{s}-ios-Debug", .{package_version}), "--manifest", "app.zon", "--assets", "assets", "--binary" });
-    package_ios_run.addFileArg(embed_lib.getEmittedBin());
-    package_ios_run.step.dependOn(&embed_lib.step);
+    const package_ios_run = b.addRunArtifact(host_cli_exe);
+    package_ios_run.addArgs(&.{ "package-ios", "--output", b.fmt("zig-out/mobile/zero-native-{s}-ios-Debug", .{package_version}), "--manifest", "app.zon", "--assets", "assets" });
     const package_ios_step = b.step("package-ios", "Create local iOS host skeleton");
     package_ios_step.dependOn(&package_ios_run.step);
 
-    const package_android_run = b.addRunArtifact(cli_exe);
-    package_android_run.addArgs(&.{ "package-android", "--output", b.fmt("zig-out/mobile/zero-native-{s}-android-Debug", .{package_version}), "--manifest", "app.zon", "--assets", "assets", "--binary" });
-    package_android_run.addFileArg(embed_lib.getEmittedBin());
-    package_android_run.step.dependOn(&embed_lib.step);
+    const package_android_run = b.addRunArtifact(host_cli_exe);
+    package_android_run.addArgs(&.{ "package-android", "--output", b.fmt("zig-out/mobile/zero-native-{s}-android-Debug", .{package_version}), "--manifest", "app.zon", "--assets", "assets" });
     const package_android_step = b.step("package-android", "Create local Android host skeleton");
     package_android_step.dependOn(&package_android_run.step);
 
@@ -473,7 +763,7 @@ pub fn build(b: *std.Build) void {
     });
     generate_icon_step.dependOn(&iconset_script.step);
 
-    const notarize_run = b.addRunArtifact(cli_exe);
+    const notarize_run = b.addRunArtifact(host_cli_exe);
     notarize_run.addArgs(&.{
         "package",
         "--target",
@@ -522,7 +812,7 @@ pub fn build(b: *std.Build) void {
     });
     const cef_bundle_step = b.step("cef-bundle", "Copy CEF framework and resources into zig-out/bin/ for local dev runs");
     if (cef_auto_install) {
-        const cef_bundle_auto = b.addRunArtifact(cli_exe);
+        const cef_bundle_auto = b.addRunArtifact(host_cli_exe);
         cef_bundle_auto.addArgs(&.{ "cef", "install", "--dir", cef_dir });
         cef_bundle_script.step.dependOn(&cef_bundle_auto.step);
     }
@@ -558,6 +848,22 @@ fn addLayoutCheckStep(b: *std.Build, group: *std.Build.Step, name: []const u8, d
     const step = b.step(name, description);
     for (paths) |path| {
         const check = b.addSystemCommand(&.{ "test", "-f", path });
+        step.dependOn(&check.step);
+        group.dependOn(&check.step);
+    }
+}
+
+const FileContainsCheck = struct {
+    path: []const u8,
+    pattern: []const u8,
+};
+
+fn addFileContainsCheckStep(b: *std.Build, checker: *std.Build.Step.Compile, group: *std.Build.Step, name: []const u8, description: []const u8, checks: []const FileContainsCheck) void {
+    const step = b.step(name, description);
+    for (checks) |check_value| {
+        const check = b.addRunArtifact(checker);
+        check.addArg(check_value.path);
+        check.addArg(check_value.pattern);
         step.dependOn(&check.step);
         group.dependOn(&check.step);
     }

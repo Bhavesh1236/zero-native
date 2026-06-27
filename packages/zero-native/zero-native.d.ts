@@ -62,6 +62,7 @@ export interface ZeroNativeWebViewInfo {
   zoom: number;
   transparent: boolean;
   bridge: boolean;
+  focused: boolean;
   open: boolean;
 }
 
@@ -130,6 +131,207 @@ export interface ZeroNativeWebViewHandle extends ZeroNativeWebViewInfo {
   close(): Promise<ZeroNativeWebViewInfo>;
 }
 
+export type ZeroNativeViewKind =
+  | "webview"
+  | "toolbar"
+  | "titlebar_accessory"
+  | "titlebarAccessory"
+  | "sidebar"
+  | "statusbar"
+  | "split"
+  | "stack"
+  | "button"
+  | "icon_button"
+  | "iconButton"
+  | "checkbox"
+  | "toggle"
+  | "segmented_control"
+  | "segmentedControl"
+  | "text_field"
+  | "textField"
+  | "search_field"
+  | "searchField"
+  | "label"
+  | "spacer"
+  | "gpu_surface"
+  | "gpuSurface"
+  | "progress_indicator"
+  | "progressIndicator";
+
+export interface ZeroNativeViewInfo {
+  /** Stable runtime view id for this window/view lifetime. */
+  id: number;
+  label: string;
+  windowId: number;
+  kind: ZeroNativeViewKind;
+  parent: string | null;
+  role: string;
+  accessibilityLabel: string;
+  text: string;
+  url: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  layer: number;
+  visible: boolean;
+  enabled: boolean;
+  transparent: boolean;
+  bridge: boolean;
+  focused: boolean;
+  command: string;
+  open: boolean;
+}
+
+export type ZeroNativeNativeViewKind = Exclude<ZeroNativeViewKind, "webview">;
+
+export interface ZeroNativeCreateViewBaseOptions {
+  label: string;
+  windowId?: number;
+  parent?: string;
+  layer?: number;
+  visible?: boolean;
+  enabled?: boolean;
+  /** Semantic role or fallback accessibility text. Use text for visible titles and placeholders. */
+  role?: string;
+  /** Accessibility label announced for the native control without changing visible text. */
+  accessibilityLabel?: string;
+  /** Visible native control label, button title, or text/search placeholder. */
+  text?: string;
+  command?: string;
+  transparent?: boolean;
+  bridge?: boolean;
+}
+
+export interface ZeroNativeCreateNativeViewOptions extends ZeroNativeCreateViewBaseOptions {
+  kind: ZeroNativeNativeViewKind;
+  frame?: ZeroNativeRect;
+  url?: never;
+}
+
+export interface ZeroNativeCreateWebViewViewOptions extends ZeroNativeCreateViewBaseOptions {
+  kind: "webview";
+  frame: ZeroNativeRect;
+  url: string;
+}
+
+export type ZeroNativeCreateViewOptions =
+  | ZeroNativeCreateNativeViewOptions
+  | ZeroNativeCreateWebViewViewOptions;
+
+export interface ZeroNativeUpdateViewOptions {
+  label: string;
+  windowId?: number;
+  frame?: ZeroNativeRect;
+  layer?: number;
+  visible?: boolean;
+  enabled?: boolean;
+  /** Semantic role or fallback accessibility text. Use text for visible titles and placeholders. */
+  role?: string;
+  /** Accessibility label announced for the native control without changing visible text. */
+  accessibilityLabel?: string;
+  /** Visible native control label, button title, or text/search placeholder. */
+  text?: string;
+  command?: string;
+  /** Only valid for WebView-backed views. */
+  url?: string;
+}
+
+export interface ZeroNativeSetViewFrameOptions {
+  label: string;
+  windowId?: number;
+  frame: ZeroNativeRect;
+}
+
+export interface ZeroNativeSetViewVisibleOptions {
+  label: string;
+  windowId?: number;
+  visible: boolean;
+}
+
+export interface ZeroNativeViewSelector {
+  label: string;
+  windowId?: number;
+}
+
+export interface ZeroNativeViewTraversalOptions {
+  windowId?: number;
+}
+
+export interface ZeroNativeViewHandle extends ZeroNativeViewInfo {
+  update(patch: Omit<ZeroNativeUpdateViewOptions, "label" | "windowId">): Promise<ZeroNativeViewHandle>;
+  setFrame(frame: ZeroNativeRect): Promise<ZeroNativeViewHandle>;
+  setVisible(visible: boolean): Promise<ZeroNativeViewHandle>;
+  focus(): Promise<ZeroNativeViewHandle>;
+  close(): Promise<ZeroNativeViewInfo>;
+}
+
+export type ZeroNativeCommandSource =
+  | "runtime"
+  | "menu"
+  | "shortcut"
+  | "toolbar"
+  | "tray"
+  | "native_view"
+  | "bridge";
+
+export type ZeroNativePlatformFeature =
+  | "main_webview"
+  | "mainWebView"
+  | "child_webviews"
+  | "childWebViews"
+  | "native_views"
+  | "nativeViews"
+  | "native_control_commands"
+  | "nativeControlCommands"
+  | "menus"
+  | "tray"
+  | "shortcuts"
+  | "dialogs"
+  | "clipboard_text"
+  | "clipboardText"
+  | "clipboard_rich_data"
+  | "clipboardRichData"
+  | "open_url"
+  | "openUrl"
+  | "reveal_path"
+  | "revealPath"
+  | "notifications"
+  | "recent_documents"
+  | "recentDocuments"
+  | "credentials"
+  | "file_drops"
+  | "fileDrops"
+  | "app_activation_events"
+  | "appActivationEvents"
+  | "gpu_surfaces"
+  | "gpuSurfaces";
+
+export type ZeroNativePlatformFeatureSelector =
+  | { feature: ZeroNativePlatformFeature; name?: never }
+  | { feature?: never; name: ZeroNativePlatformFeature };
+
+export interface ZeroNativeCommandEvent {
+  name: string;
+  source: ZeroNativeCommandSource;
+  windowId: number;
+  viewLabel: string;
+  /** Native tray item id for tray-sourced commands, otherwise 0. */
+  trayItemId: number;
+}
+
+export interface ZeroNativeCommandInfo {
+  id: string;
+  title: string;
+  enabled: boolean;
+  checked: boolean;
+}
+
+export interface ZeroNativeCommandSelector {
+  name?: string;
+  id?: string;
+}
+
 export interface ZeroNativeShortcutModifiers {
   primary: boolean;
   command: boolean;
@@ -145,6 +347,13 @@ export interface ZeroNativeShortcutDetail {
   key: string;
   windowId: number;
   modifiers: ZeroNativeShortcutModifiers;
+}
+
+export type ZeroNativeAppLifecycleDetail = Record<string, never>;
+
+export interface ZeroNativeFileDropDetail {
+  windowId: number;
+  paths: string[];
 }
 
 export interface ZeroNativeOpenFileOptions {
@@ -170,12 +379,62 @@ export interface ZeroNativeMessageDialogOptions {
   tertiaryButton?: string;
 }
 
+export interface ZeroNativeOpenUrlOptions {
+  url: string;
+}
+
+export interface ZeroNativeRevealPathOptions {
+  path: string;
+}
+
+export interface ZeroNativeRecentDocumentOptions {
+  path: string;
+}
+
+export interface ZeroNativeNotificationOptions {
+  title: string;
+  subtitle?: string;
+  body?: string;
+}
+
+export interface ZeroNativeClipboardReadOptions {
+  mimeType?: string;
+}
+
+export interface ZeroNativeClipboardWriteOptions {
+  mimeType?: string;
+  data: string;
+}
+
+export interface ZeroNativeClipboardData {
+  mimeType: string;
+  data: string;
+}
+
+export interface ZeroNativeCredentialKey {
+  service: string;
+  account: string;
+}
+
+export interface ZeroNativeSetCredentialOptions extends ZeroNativeCredentialKey {
+  secret: string;
+}
+
 export interface ZeroNativeApi {
   invoke<T = ZeroNativeJson>(command: string, payload?: ZeroNativeJson): Promise<T>;
   on(name: "shortcut", callback: (detail: ZeroNativeShortcutDetail) => void): () => void;
+  on(name: "app:activate" | "app:deactivate", callback: (detail: ZeroNativeAppLifecycleDetail) => void): () => void;
+  on(name: "drop:files", callback: (detail: ZeroNativeFileDropDetail) => void): () => void;
   on<T = ZeroNativeJson>(name: string, callback: (detail: T) => void): () => void;
   off(name: "shortcut", callback: (detail: ZeroNativeShortcutDetail) => void): void;
+  off(name: "app:activate" | "app:deactivate", callback: (detail: ZeroNativeAppLifecycleDetail) => void): void;
+  off(name: "drop:files", callback: (detail: ZeroNativeFileDropDetail) => void): void;
   off<T = ZeroNativeJson>(name: string, callback: (detail: T) => void): void;
+  /** Dispatch an app command through the runtime command path. */
+  commands: {
+    invoke(command: string | ZeroNativeCommandSelector): Promise<ZeroNativeCommandEvent>;
+    list(): Promise<ZeroNativeCommandInfo[]>;
+  };
   windows: {
     create(options?: ZeroNativeCreateWindowOptions): Promise<ZeroNativeWindowInfo>;
     list(): Promise<ZeroNativeWindowInfo[]>;
@@ -192,10 +451,44 @@ export interface ZeroNativeApi {
     setLayer(options: ZeroNativeSetWebViewLayerOptions): Promise<ZeroNativeWebViewInfo>;
     close(options?: ZeroNativeCloseWebViewOptions): Promise<ZeroNativeWebViewInfo>;
   };
+  /** Manage generic native views and WebView-backed views inside the calling native window. */
+  views: {
+    create(options: ZeroNativeCreateViewOptions): Promise<ZeroNativeViewHandle>;
+    list(): Promise<ZeroNativeViewInfo[]>;
+    update(label: string, patch: Omit<ZeroNativeUpdateViewOptions, "label" | "windowId">): Promise<ZeroNativeViewHandle>;
+    update(options: ZeroNativeUpdateViewOptions): Promise<ZeroNativeViewHandle>;
+    setFrame(options: ZeroNativeSetViewFrameOptions): Promise<ZeroNativeViewHandle>;
+    setVisible(options: ZeroNativeSetViewVisibleOptions): Promise<ZeroNativeViewHandle>;
+    focus(options: string | ZeroNativeViewSelector): Promise<ZeroNativeViewHandle>;
+    focusNext(options?: ZeroNativeViewTraversalOptions): Promise<ZeroNativeViewHandle>;
+    focusPrevious(options?: ZeroNativeViewTraversalOptions): Promise<ZeroNativeViewHandle>;
+    close(options: string | ZeroNativeViewSelector): Promise<ZeroNativeViewInfo>;
+  };
   dialogs: {
     openFile(options?: ZeroNativeOpenFileOptions): Promise<string[] | null>;
     saveFile(options?: ZeroNativeSaveFileOptions): Promise<string | null>;
     showMessage(options?: ZeroNativeMessageDialogOptions): Promise<"primary" | "secondary" | "tertiary">;
+  };
+  clipboard: {
+    readText(): Promise<string>;
+    writeText(value: string | { text: string }): Promise<boolean>;
+    read(options?: ZeroNativeClipboardReadOptions): Promise<ZeroNativeClipboardData>;
+    write(options: string | ZeroNativeClipboardWriteOptions): Promise<boolean>;
+  };
+  os: {
+    openUrl(value: string | ZeroNativeOpenUrlOptions): Promise<boolean>;
+    showNotification(value: string | ZeroNativeNotificationOptions): Promise<boolean>;
+    revealPath(value: string | ZeroNativeRevealPathOptions): Promise<boolean>;
+    addRecentDocument(value: string | ZeroNativeRecentDocumentOptions): Promise<boolean>;
+    clearRecentDocuments(): Promise<boolean>;
+  };
+  credentials: {
+    set(options: ZeroNativeSetCredentialOptions): Promise<boolean>;
+    get(options: ZeroNativeCredentialKey): Promise<string | null>;
+    delete(options: ZeroNativeCredentialKey): Promise<boolean>;
+  };
+  platform: {
+    supports(value: ZeroNativePlatformFeature | ZeroNativePlatformFeatureSelector): Promise<boolean>;
   };
 }
 

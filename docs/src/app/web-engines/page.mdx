@@ -26,7 +26,7 @@ zero-native has one app/runtime API and selectable web engine backends. The defa
     <tr>
       <td>Windows</td>
       <td>In progress</td>
-      <td>In progress</td>
+      <td>Not wired yet; builds fail early instead of silently using WebView2</td>
     </tr>
   </tbody>
 </table>
@@ -57,7 +57,7 @@ zig build run
 
 CEF mode is first-class on macOS. It uses the same zero-native runtime APIs as WKWebView, but bundles Chromium for rendering consistency and a predictable web platform.
 
-Chromium is available through CEF on macOS, Linux, and Windows. Linux can still use WebKitGTK with `system`, and Windows can use the native system host with `system`.
+Chromium is available through CEF on macOS. Linux can still use WebKitGTK with `system`, and Windows can use the native system host with `system`; Linux and Windows Chromium builds fail early until their CEF hosts are implemented.
 
 ### Setup
 
@@ -68,7 +68,7 @@ zero-native cef install
 zero-native doctor --manifest app.zon
 ```
 
-`zero-native cef install` downloads zero-native's prepared CEF runtime for the current platform from GitHub Releases, verifies it, and installs a complete layout into `third_party/cef/macos`, `third_party/cef/linux`, or `third_party/cef/windows`. The prepared runtime already includes `libcef_dll_wrapper`, so app developers do not need CMake or Chromium build knowledge.
+`zero-native cef install` downloads zero-native's prepared CEF runtime from GitHub Releases, verifies it, and installs a complete layout. App builds currently consume the macOS layout at `third_party/cef/macos`; Linux and Windows layouts are reserved for the future CEF hosts. The prepared runtime already includes `libcef_dll_wrapper`, so app developers do not need CMake or Chromium build knowledge.
 
 The default install uses zero-native's pinned tested CEF version. Pin that version in your app CI or setup docs with `zero-native cef install --version <version>`, rerun the install when you intentionally update Chromium, then rebuild and repackage the app. A packaged Chromium app must bundle the same CEF layout the binary was linked against; mismatches usually show up as launch failures or missing framework/resource errors.
 

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { PAGE_TITLES } from "./page-titles";
 
 const DESCRIPTION =
-  "Build desktop apps with Zig and selectable web engines. System WebView or bundled Chromium.";
+  "Build native apps with Zig, secure WebView surfaces, native controls, and OS capabilities.";
 
 export function pageMetadata(slug: string): Metadata {
   const title = PAGE_TITLES[slug];

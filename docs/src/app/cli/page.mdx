@@ -187,7 +187,7 @@ Core maintainers who need to build CEF before a zero-native runtime release exis
     </tr>
     <tr>
       <td><code>--web-engine</code></td>
-      <td>Temporarily override <code>app.zon</code> with <code>system</code> or <code>chromium</code></td>
+      <td>Temporarily override <code>app.zon</code> with <code>system</code> or macOS-only <code>chromium</code></td>
     </tr>
     <tr>
       <td><code>--cef-dir</code></td>
@@ -278,6 +278,30 @@ Core maintainers who need to build CEF before a zero-native runtime release exis
     <tr>
       <td><code>automate reload</code></td>
       <td>Reload the WebView</td>
+    </tr>
+    <tr>
+      <td><code>automate resize &lt;width&gt; &lt;height&gt; [&lt;scale&gt;]</code></td>
+      <td>Dispatch a main-window resize event</td>
+    </tr>
+    <tr>
+      <td><code>automate menu-command &lt;id&gt;</code></td>
+      <td>Dispatch a menu command event</td>
+    </tr>
+    <tr>
+      <td><code>automate native-command &lt;id&gt; [&lt;view-label&gt;]</code></td>
+      <td>Dispatch a native view command event</td>
+    </tr>
+    <tr>
+      <td><code>automate shortcut &lt;id&gt;</code></td>
+      <td>Dispatch a shortcut command event</td>
+    </tr>
+    <tr>
+      <td><code>automate focus &lt;view-label&gt;</code></td>
+      <td>Focus a native or WebView-backed view</td>
+    </tr>
+    <tr>
+      <td><code>automate focus-next</code> / <code>automate focus-previous</code></td>
+      <td>Move focus through visible, enabled views</td>
     </tr>
     <tr>
       <td><code>automate wait</code></td>

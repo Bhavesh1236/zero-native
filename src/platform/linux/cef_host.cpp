@@ -282,6 +282,100 @@ int zero_native_gtk_close_window(Host *host, uint64_t window_id) {
     return 1;
 }
 
+int zero_native_gtk_create_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *accessibility_label, size_t accessibility_label_len, const char *text, size_t text_len, const char *command, size_t command_len) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)kind;
+    (void)parent;
+    (void)parent_len;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    (void)layer;
+    (void)visible;
+    (void)enabled;
+    (void)role;
+    (void)role_len;
+    (void)accessibility_label;
+    (void)accessibility_label_len;
+    (void)text;
+    (void)text_len;
+    (void)command;
+    (void)command_len;
+    return 0;
+}
+
+int zero_native_gtk_update_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_accessibility_label, const char *accessibility_label, size_t accessibility_label_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)has_frame;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    (void)has_layer;
+    (void)layer;
+    (void)has_visible;
+    (void)visible;
+    (void)has_enabled;
+    (void)enabled;
+    (void)has_role;
+    (void)role;
+    (void)role_len;
+    (void)has_accessibility_label;
+    (void)accessibility_label;
+    (void)accessibility_label_len;
+    (void)has_text;
+    (void)text;
+    (void)text_len;
+    (void)has_command;
+    (void)command;
+    (void)command_len;
+    return 0;
+}
+
+int zero_native_gtk_set_view_frame(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    return 0;
+}
+
+int zero_native_gtk_set_view_visible(Host *host, uint64_t window_id, const char *label, size_t label_len, int visible) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)visible;
+    return 0;
+}
+
+int zero_native_gtk_focus_view(Host *host, uint64_t window_id, const char *label, size_t label_len) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    return 0;
+}
+
+int zero_native_gtk_close_view(Host *host, uint64_t window_id, const char *label, size_t label_len) {
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    return 0;
+}
+
 int zero_native_gtk_create_webview(Host *host, uint64_t window_id, const char *label, size_t label_len, const char *url, size_t url_len, double x, double y, double width, double height, int layer, int transparent, int bridge_enabled) {
     (void)host;
     (void)window_id;
@@ -347,6 +441,79 @@ int zero_native_gtk_close_webview(Host *host, uint64_t window_id, const char *la
     return 0;
 }
 
+int zero_native_gtk_open_external_url(Host *host, const char *url, size_t url_len) {
+    (void)host;
+    (void)url;
+    (void)url_len;
+    return 0;
+}
+
+int zero_native_gtk_reveal_path(Host *host, const char *path, size_t path_len) {
+    (void)host;
+    (void)path;
+    (void)path_len;
+    return 0;
+}
+
+int zero_native_gtk_show_notification(Host *host, const char *title, size_t title_len, const char *subtitle, size_t subtitle_len, const char *body, size_t body_len) {
+    (void)host;
+    (void)title;
+    (void)title_len;
+    (void)subtitle;
+    (void)subtitle_len;
+    (void)body;
+    (void)body_len;
+    return 0;
+}
+
+int zero_native_gtk_add_recent_document(Host *host, const char *path, size_t path_len) {
+    (void)host;
+    (void)path;
+    (void)path_len;
+    return 0;
+}
+
+int zero_native_gtk_clear_recent_documents(Host *host) {
+    (void)host;
+    return 0;
+}
+
+int zero_native_gtk_credentials_available(Host *host) {
+    (void)host;
+    return 0;
+}
+
+int zero_native_gtk_set_credential(Host *host, const char *service, size_t service_len, const char *account, size_t account_len, const char *secret, size_t secret_len) {
+    (void)host;
+    (void)service;
+    (void)service_len;
+    (void)account;
+    (void)account_len;
+    (void)secret;
+    (void)secret_len;
+    return 0;
+}
+
+size_t zero_native_gtk_get_credential(Host *host, const char *service, size_t service_len, const char *account, size_t account_len, char *buffer, size_t buffer_len) {
+    (void)host;
+    (void)service;
+    (void)service_len;
+    (void)account;
+    (void)account_len;
+    (void)buffer;
+    (void)buffer_len;
+    return 0;
+}
+
+int zero_native_gtk_delete_credential(Host *host, const char *service, size_t service_len, const char *account, size_t account_len) {
+    (void)host;
+    (void)service;
+    (void)service_len;
+    (void)account;
+    (void)account_len;
+    return 0;
+}
+
 size_t zero_native_gtk_clipboard_read(Host *host, char *buffer, size_t buffer_len) {
     (void)host;
     (void)buffer;
@@ -358,6 +525,24 @@ void zero_native_gtk_clipboard_write(Host *host, const char *text, size_t text_l
     (void)host;
     (void)text;
     (void)text_len;
+}
+
+size_t zero_native_gtk_clipboard_read_data(Host *host, const char *mime_type, size_t mime_type_len, char *buffer, size_t buffer_len) {
+    (void)host;
+    (void)mime_type;
+    (void)mime_type_len;
+    (void)buffer;
+    (void)buffer_len;
+    return 0;
+}
+
+int zero_native_gtk_clipboard_write_data(Host *host, const char *mime_type, size_t mime_type_len, const char *bytes, size_t bytes_len) {
+    (void)host;
+    (void)mime_type;
+    (void)mime_type_len;
+    (void)bytes;
+    (void)bytes_len;
+    return 0;
 }
 
 OpenDialogResult zero_native_gtk_show_open_dialog(Host *host, const void *opts, char *buffer, size_t buffer_len) {

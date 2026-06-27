@@ -15,6 +15,38 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !
         return error.UnsupportedCommand;
     } else if (std.mem.eql(u8, command, "reload")) {
         try sendCommand(allocator, io, "reload", "");
+    } else if (std.mem.eql(u8, command, "resize")) {
+        if (args.len < 3 or args.len > 4) return usage();
+        const value = if (args.len == 4)
+            try std.fmt.allocPrint(allocator, "{s} {s} {s}", .{ args[1], args[2], args[3] })
+        else
+            try std.fmt.allocPrint(allocator, "{s} {s}", .{ args[1], args[2] });
+        defer allocator.free(value);
+        try sendCommand(allocator, io, "resize", value);
+    } else if (std.mem.eql(u8, command, "menu-command")) {
+        if (args.len != 2) return usage();
+        try sendCommand(allocator, io, "menu-command", args[1]);
+    } else if (std.mem.eql(u8, command, "native-command")) {
+        if (args.len < 2 or args.len > 3) return usage();
+        if (args.len == 3) {
+            const value = try std.fmt.allocPrint(allocator, "{s} {s}", .{ args[1], args[2] });
+            defer allocator.free(value);
+            try sendCommand(allocator, io, "native-command", value);
+        } else {
+            try sendCommand(allocator, io, "native-command", args[1]);
+        }
+    } else if (std.mem.eql(u8, command, "shortcut")) {
+        if (args.len != 2) return usage();
+        try sendCommand(allocator, io, "shortcut", args[1]);
+    } else if (std.mem.eql(u8, command, "focus")) {
+        if (args.len != 2) return usage();
+        try sendCommand(allocator, io, "focus", args[1]);
+    } else if (std.mem.eql(u8, command, "focus-next")) {
+        if (args.len != 1) return usage();
+        try sendCommand(allocator, io, "focus-next", "");
+    } else if (std.mem.eql(u8, command, "focus-previous")) {
+        if (args.len != 1) return usage();
+        try sendCommand(allocator, io, "focus-previous", "");
     } else if (std.mem.eql(u8, command, "wait")) {
         try waitForFile(allocator, io, "snapshot.txt", "ready=true");
     } else if (std.mem.eql(u8, command, "bridge")) {
@@ -36,6 +68,13 @@ fn usage() void {
         \\  snapshot
         \\  screenshot
         \\  reload
+        \\  resize <width> <height> [scale]
+        \\  menu-command <id>
+        \\  native-command <id> [view-label]
+        \\  shortcut <id>
+        \\  focus <view-label>
+        \\  focus-next
+        \\  focus-previous
         \\  wait
         \\  bridge <request-json>
         \\

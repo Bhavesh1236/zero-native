@@ -65,6 +65,12 @@ fn readPath(io: std.Io, path: []const u8, buffer: []u8) ![]const u8 {
     return buffer[0..try file.readPositionalAll(io, buffer, 0)];
 }
 
+fn resetTestDirectory(io: std.Io, path: []const u8) !void {
+    var cwd = std.Io.Dir.cwd();
+    cwd.deleteTree(io, path) catch {};
+    try cwd.createDirPath(io, path);
+}
+
 test "server stores directory metadata" {
     const server = Server.init(std.testing.io, ".zig-cache/test-webview-automation", "Test");
     try std.testing.expectEqualStrings("Test", server.title);
@@ -78,4 +84,31 @@ test "server writes bridge response artifact" {
     var path_buffer: [256]u8 = undefined;
     const bytes = try readPath(std.testing.io, server.path("bridge-response.txt", &path_buffer), &buffer);
     try std.testing.expectEqualStrings("{\"id\":\"1\",\"ok\":true}", bytes);
+}
+
+test "server consumes automation command files" {
+    const directory = ".zig-cache/test-webview-automation-command";
+    try resetTestDirectory(std.testing.io, directory);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, directory) catch {};
+
+    const server = Server.init(std.testing.io, directory, "Test");
+    var path_buffer: [256]u8 = undefined;
+    const command_path = server.path("command.txt", &path_buffer);
+
+    try writePath(std.testing.io, command_path, "native-command app.refresh refresh-button\n");
+
+    var command_buffer: [256]u8 = undefined;
+    const native_command = (try server.takeCommand(&command_buffer)).?;
+    try std.testing.expectEqual(protocol.Action.native_command, native_command.action);
+    try std.testing.expectEqualStrings("app.refresh refresh-button", native_command.value);
+
+    var done_buffer: [16]u8 = undefined;
+    const done = try readPath(std.testing.io, command_path, &done_buffer);
+    try std.testing.expectEqualStrings("done\n", done);
+    try std.testing.expect(try server.takeCommand(&command_buffer) == null);
+
+    try writePath(std.testing.io, command_path, "focus-next\n");
+    const focus_next = (try server.takeCommand(&command_buffer)).?;
+    try std.testing.expectEqual(protocol.Action.focus_next_view, focus_next.action);
+    try std.testing.expectEqualStrings("", focus_next.value);
 }

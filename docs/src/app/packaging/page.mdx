@@ -1,6 +1,6 @@
 # Packaging
 
-zero-native provides tooling to bundle your app into distributable packages for macOS, Linux, and Windows. Chromium packages include the platform-specific CEF runtime when `.web_engine = "chromium"` and the matching CEF layout is installed.
+zero-native provides tooling to bundle your app into distributable packages for macOS, Linux, and Windows. Chromium packaging is currently supported for macOS and includes the CEF runtime when `.web_engine = "chromium"` and the matching CEF layout is installed.
 
 ## Quick start
 
@@ -40,7 +40,7 @@ The build system exposes options that control platform, web engine, and build fe
       <td><code>-Dweb-engine</code></td>
       <td><code>system</code>, <code>chromium</code></td>
       <td><code>app.zon</code></td>
-      <td>Temporary WebView engine override</td>
+      <td>Temporary WebView engine override; Chromium is currently macOS-only</td>
     </tr>
     <tr>
       <td><code>-Dcef-dir</code></td>
@@ -117,6 +117,14 @@ The manifest drives packaging metadata:
       <td>Copied into the app bundle per platform convention</td>
     </tr>
     <tr>
+      <td><code>file_associations</code></td>
+      <td>Document type metadata for macOS, Linux, and Windows registration artifacts</td>
+    </tr>
+    <tr>
+      <td><code>url_schemes</code></td>
+      <td>Custom protocol metadata for macOS, Linux, and Windows registration artifacts</td>
+    </tr>
+    <tr>
       <td><code>platforms</code></td>
       <td>Which platform packages to generate</td>
     </tr>
@@ -134,7 +142,7 @@ The manifest drives packaging metadata:
 - `Contents/Info.plist` -- generated from `app.zon`
 - `Contents/Resources/dist/` -- frontend assets (if configured)
 
-macOS app bundles declare `LSMinimumSystemVersion` as `11.0`.
+macOS app bundles declare `LSMinimumSystemVersion` as `11.0`. File associations and URL schemes are emitted as `CFBundleDocumentTypes` and `CFBundleURLTypes` entries in `Contents/Info.plist`.
 
 See [Code Signing](/packaging/signing) for signing, notarization, and DMG creation.
 
@@ -147,10 +155,13 @@ Linux packaging creates an install tree:
 - `bin/<name>` -- the executable
 - `share/applications/<name>.desktop` -- desktop entry file
 - `share/icons/hicolor/.../<name>.png` -- icons at standard sizes
+- `share/mime/packages/<name>.xml` -- shared MIME metadata when file associations are configured
 
 ```bash
 zero-native package --target linux --manifest app.zon --binary zig-out/bin/MyApp
 ```
+
+Configured file associations and URL schemes are added to the desktop file `MimeType` list. Extension-only associations get generated `application/x-...` MIME types with glob patterns in the shared MIME package.
 
 ## Windows
 
@@ -158,7 +169,7 @@ zero-native package --target linux --manifest app.zon --binary zig-out/bin/MyApp
 zero-native package --target windows --manifest app.zon --binary zig-out/bin/MyApp.exe
 ```
 
-Windows packaging is in early development. The packager copies the binary and assets into a distributable directory structure.
+Windows packaging is in early development. The packager copies the binary and assets into a distributable directory structure. When file associations or URL schemes are configured, the artifact also includes `install/register-file-types.ps1`, which registers the package-local executable under the current user's `HKCU\Software\Classes` registry keys.
 
 ## Frontend assets
 
@@ -207,13 +218,13 @@ This copies the configured `dist` directory into the build output. Production pa
 
 ## CEF bundling
 
-When using the Chromium engine, bundle CEF alongside the app:
+When using the Chromium engine on macOS, bundle CEF alongside the app:
 
 ```bash
 zig build cef-bundle -Dcef-dir=/path/to/cef
 ```
 
-This copies the required CEF framework, libraries, and resources into the app bundle. The CEF distribution must match the target platform and architecture.
+This copies the required CEF framework, libraries, and resources into the app bundle. The CEF distribution must match the macOS target architecture.
 
 Use the same CEF version for install, build, package, and CI verification. The usual app-developer flow is:
 

@@ -3,12 +3,16 @@
 #import <AppKit/AppKit.h>
 #import <WebKit/WebKit.h>
 #import <CoreFoundation/CoreFoundation.h>
+#import <Security/Security.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#include <stdint.h>
 #include <string.h>
 
 @class ZeroNativeAppKitHost;
 
 static const NSUInteger ZeroNativeMaxChildWebViews = 16;
+static const NSUInteger ZeroNativeMaxNativeViews = 32;
+static const NSInteger ZeroNativeBridgeFrameKeepaliveFrames = 600;
 static const uint32_t ZeroNativeShortcutModifierPrimary = 1u << 0;
 static const uint32_t ZeroNativeShortcutModifierCommand = 1u << 1;
 static const uint32_t ZeroNativeShortcutModifierControl = 1u << 2;
@@ -26,14 +30,75 @@ static BOOL ZeroNativePolicyListMatches(NSArray<NSString *> *values, NSURL *url)
 static NSString *ZeroNativeShortcutKeyForEvent(NSEvent *event);
 static BOOL ZeroNativeShortcutUsesImplicitShift(NSString *key, NSEvent *event);
 static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEventModifierFlags eventModifiers, BOOL allowImplicitShift);
+static NSEventModifierFlags ZeroNativeMenuModifierFlags(uint32_t modifiers);
+static NSAccessibilityRole ZeroNativeAccessibilityRoleForNativeViewKind(NSInteger kind);
+
+static size_t ZeroNativeOverflowSize(size_t buffer_len) {
+    return buffer_len == SIZE_MAX ? SIZE_MAX : buffer_len + 1;
+}
+
+static NSString *ZeroNativeStringFromBytes(const char *bytes, size_t len) {
+    if (!bytes || len == 0) return nil;
+    return [[NSString alloc] initWithBytes:bytes length:len encoding:NSUTF8StringEncoding];
+}
+
+static NSString *ZeroNativePasteboardTypeForMime(const char *mime_type, size_t mime_type_len) {
+    NSString *mime = ZeroNativeStringFromBytes(mime_type, mime_type_len).lowercaseString;
+    if ([mime isEqualToString:@"text"] || [mime isEqualToString:@"text/plain"]) return NSPasteboardTypeString;
+    if ([mime isEqualToString:@"text/html"]) return NSPasteboardTypeHTML;
+    if ([mime isEqualToString:@"text/rtf"] || [mime isEqualToString:@"application/rtf"]) return NSPasteboardTypeRTF;
+    return nil;
+}
+
+static NSAccessibilityRole ZeroNativeAccessibilityRoleForNativeViewKind(NSInteger kind) {
+    switch (kind) {
+        case ZERO_NATIVE_APPKIT_VIEW_TOOLBAR:
+        case ZERO_NATIVE_APPKIT_VIEW_TITLEBAR_ACCESSORY:
+            return NSAccessibilityToolbarRole;
+        case ZERO_NATIVE_APPKIT_VIEW_SPLIT:
+            return NSAccessibilitySplitterRole;
+        case ZERO_NATIVE_APPKIT_VIEW_BUTTON:
+        case ZERO_NATIVE_APPKIT_VIEW_ICON_BUTTON:
+        case ZERO_NATIVE_APPKIT_VIEW_TOGGLE:
+            return NSAccessibilityButtonRole;
+        case ZERO_NATIVE_APPKIT_VIEW_CHECKBOX:
+            return NSAccessibilityCheckBoxRole;
+        case ZERO_NATIVE_APPKIT_VIEW_SEGMENTED_CONTROL:
+            return NSAccessibilityRadioGroupRole;
+        case ZERO_NATIVE_APPKIT_VIEW_TEXT_FIELD:
+        case ZERO_NATIVE_APPKIT_VIEW_SEARCH_FIELD:
+            return NSAccessibilityTextFieldRole;
+        case ZERO_NATIVE_APPKIT_VIEW_LABEL:
+            return NSAccessibilityStaticTextRole;
+        case ZERO_NATIVE_APPKIT_VIEW_PROGRESS_INDICATOR:
+            return NSAccessibilityProgressIndicatorRole;
+        case ZERO_NATIVE_APPKIT_VIEW_STATUSBAR:
+        case ZERO_NATIVE_APPKIT_VIEW_SIDEBAR:
+        case ZERO_NATIVE_APPKIT_VIEW_STACK:
+        case ZERO_NATIVE_APPKIT_VIEW_SPACER:
+            return NSAccessibilityGroupRole;
+        default:
+            return NSAccessibilityUnknownRole;
+    }
+}
+
+static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSString *account) {
+    return [@{
+        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecAttrService: service,
+        (__bridge id)kSecAttrAccount: account,
+    } mutableCopy];
+}
 
 @interface ZeroNativeWindowDelegate : NSObject <NSWindowDelegate>
 @property(nonatomic, assign) ZeroNativeAppKitHost *host;
 @property(nonatomic, assign) uint64_t windowId;
 @end
 
-@interface ZeroNativeWebView : WKWebView
+@interface ZeroNativeWebView : WKWebView <NSDraggingDestination>
 @property(nonatomic, strong) NSArray<NSValue *> *coveredMouseRects;
+@property(nonatomic, assign) ZeroNativeAppKitHost *host;
+@property(nonatomic, assign) uint64_t windowId;
 @end
 
 @interface ZeroNativeBridgeScriptHandler : NSObject <WKScriptMessageHandler>
@@ -68,6 +133,9 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, ZeroNativeAssetSchemeHandler *> *assetSchemeHandlers;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *windowLabels;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, WKWebView *> *childWebViews;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSView *> *nativeViews;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *nativeViewCommands;
+@property(nonatomic, strong) NSMutableSet<NSString *> *nativeViewExplicitTextKeys;
 @property(nonatomic, strong) NSMutableSet<NSString *> *bridgeEnabledChildWebViewKeys;
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) NSString *appName;
@@ -79,6 +147,7 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
 @property(nonatomic, assign) void *context;
 @property(nonatomic, assign) void *bridgeContext;
 @property(nonatomic, assign) BOOL didShutdown;
+@property(nonatomic, assign) BOOL observesApplicationActivation;
 @property(nonatomic, assign) NSInteger bridgeFrameKeepalive;
 @property(nonatomic, strong) id shortcutEventMonitor;
 @property(nonatomic, strong) NSArray<ZeroNativeShortcut *> *shortcuts;
@@ -95,6 +164,23 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
 - (WKWebView *)webViewForWindowId:(uint64_t)windowId;
 - (WKWebView *)mainWebViewForWindow:(NSWindow *)window;
 - (ZeroNativeAssetSchemeHandler *)assetHandlerForWindowId:(uint64_t)windowId;
+- (NSString *)nativeViewKeyForWindow:(uint64_t)windowId label:(NSString *)label;
+- (NSRect)viewFrameForContainer:(NSView *)container x:(double)x y:(double)y width:(double)width height:(double)height;
+- (NSView *)nativeParentViewForWindow:(uint64_t)windowId parent:(NSString *)parent;
+- (NSView *)makeNativeViewWithKind:(NSInteger)kind label:(NSString *)label role:(NSString *)role text:(NSString *)text;
+- (void)applyNativeViewState:(NSView *)view enabled:(BOOL)enabled role:(NSString *)role accessibilityLabel:(NSString *)accessibilityLabel text:(NSString *)text;
+- (void)applySegmentedControl:(NSSegmentedControl *)control text:(NSString *)text;
+- (void)configureNativeView:(NSView *)view command:(NSString *)command key:(NSString *)key;
+- (void)emitNativeCommandForSender:(id)sender;
+- (BOOL)createNativeViewInWindow:(uint64_t)windowId label:(NSString *)label kind:(NSInteger)kind parent:(NSString *)parent x:(double)x y:(double)y width:(double)width height:(double)height layer:(NSInteger)layer visible:(BOOL)visible enabled:(BOOL)enabled role:(NSString *)role accessibilityLabel:(NSString *)accessibilityLabel text:(NSString *)text command:(NSString *)command;
+- (BOOL)updateNativeViewInWindow:(uint64_t)windowId label:(NSString *)label hasFrame:(BOOL)hasFrame x:(double)x y:(double)y width:(double)width height:(double)height hasLayer:(BOOL)hasLayer layer:(NSInteger)layer hasVisible:(BOOL)hasVisible visible:(BOOL)visible hasEnabled:(BOOL)hasEnabled enabled:(BOOL)enabled hasRole:(BOOL)hasRole role:(NSString *)role hasAccessibilityLabel:(BOOL)hasAccessibilityLabel accessibilityLabel:(NSString *)accessibilityLabel hasText:(BOOL)hasText text:(NSString *)text hasCommand:(BOOL)hasCommand command:(NSString *)command;
+- (BOOL)setNativeViewFrameInWindow:(uint64_t)windowId label:(NSString *)label x:(double)x y:(double)y width:(double)width height:(double)height;
+- (BOOL)setNativeViewVisibleInWindow:(uint64_t)windowId label:(NSString *)label visible:(BOOL)visible;
+- (BOOL)focusNativeViewInWindow:(uint64_t)windowId label:(NSString *)label;
+- (BOOL)nativeView:(NSView *)candidate isInSubtreeRootedAt:(NSView *)root;
+- (NSArray<NSString *> *)nativeViewKeysInSubtreeForWindow:(uint64_t)windowId rootKey:(NSString *)rootKey;
+- (BOOL)closeNativeViewInWindow:(uint64_t)windowId label:(NSString *)label;
+- (void)closeNativeViewsInWindow:(uint64_t)windowId;
 - (BOOL)createWebViewInWindow:(uint64_t)windowId label:(NSString *)label url:(NSString *)url x:(double)x y:(double)y width:(double)width height:(double)height layer:(NSInteger)layer transparent:(BOOL)transparent bridgeEnabled:(BOOL)bridgeEnabled;
 - (BOOL)setWebViewFrameInWindow:(uint64_t)windowId label:(NSString *)label x:(double)x y:(double)y width:(double)width height:(double)height;
 - (BOOL)navigateWebViewInWindow:(uint64_t)windowId label:(NSString *)label url:(NSString *)url;
@@ -109,10 +195,20 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
 - (void)removeAllChildBridgeHandlers;
 - (void)configureApplication;
 - (void)buildMenuBar;
+- (void)addApplicationMenuToMenu:(NSMenu *)mainMenu;
 - (NSMenuItem *)menuItem:(NSString *)title action:(SEL)action key:(NSString *)key modifiers:(NSEventModifierFlags)modifiers;
+- (NSMenuItem *)commandMenuItem:(NSString *)title command:(NSString *)command key:(NSString *)key modifiers:(uint32_t)modifiers enabled:(BOOL)enabled checked:(BOOL)checked;
+- (void)menuCommandItemClicked:(NSMenuItem *)menuItem;
+- (uint64_t)activeCommandWindowId;
+- (void)setMenusWithTitles:(const char *const *)menuTitles titleLengths:(const size_t *)menuTitleLengths count:(size_t)menuCount itemMenuIndices:(const uint32_t *)itemMenuIndices itemLabels:(const char *const *)itemLabels itemLabelLengths:(const size_t *)itemLabelLengths itemCommands:(const char *const *)itemCommands itemCommandLengths:(const size_t *)itemCommandLengths itemKeys:(const char *const *)itemKeys itemKeyLengths:(const size_t *)itemKeyLengths itemModifiers:(const uint32_t *)itemModifiers itemSeparators:(const int *)itemSeparators itemEnabled:(const int *)itemEnabled itemChecked:(const int *)itemChecked itemCount:(size_t)itemCount;
 - (void)runWithCallback:(zero_native_appkit_event_callback_t)callback context:(void *)context;
 - (void)stop;
 - (void)emitEvent:(zero_native_appkit_event_t)event;
+- (BOOL)emitDroppedFileURLs:(NSArray<NSURL *> *)urls windowId:(uint64_t)windowId;
+- (void)startApplicationActivationObservers;
+- (void)stopApplicationActivationObservers;
+- (void)applicationDidBecomeActive:(NSNotification *)notification;
+- (void)applicationDidResignActive:(NSNotification *)notification;
 - (void)emitResize;
 - (void)emitResizeForWindowId:(uint64_t)windowId;
 - (void)emitDeferredResizeForWindowId:(uint64_t)windowId;
@@ -166,6 +262,7 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
     (void)notification;
     [self.host emitWindowFrameForWindowId:self.windowId open:NO];
     [self.host closeWebViewsInWindow:self.windowId];
+    [self.host closeNativeViewsInWindow:self.windowId];
     NSNumber *key = @(self.windowId);
     [self.host.windows removeObjectForKey:key];
     [self.host.webViews removeObjectForKey:key];
@@ -209,6 +306,18 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
 - (void)mouseDragged:(NSEvent *)event { if (![self eventIsCovered:event]) [super mouseDragged:event]; }
 - (void)rightMouseDown:(NSEvent *)event { if (![self eventIsCovered:event]) [super rightMouseDown:event]; }
 - (void)rightMouseUp:(NSEvent *)event { if (![self eventIsCovered:event]) [super rightMouseUp:event]; }
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+    (void)sender;
+    return NSDragOperationCopy;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+    NSPasteboard *pasteboard = sender.draggingPasteboard;
+    NSArray<NSURL *> *urls = [pasteboard readObjectsForClasses:@[[NSURL class]]
+                                                       options:@{ NSPasteboardURLReadingFileURLsOnlyKey: @YES }];
+    return [self.host emitDroppedFileURLs:urls windowId:self.windowId];
+}
 
 @end
 
@@ -302,6 +411,9 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
     self.assetSchemeHandlers = [[NSMutableDictionary alloc] init];
     self.windowLabels = [[NSMutableDictionary alloc] init];
     self.childWebViews = [[NSMutableDictionary alloc] init];
+    self.nativeViews = [[NSMutableDictionary alloc] init];
+    self.nativeViewCommands = [[NSMutableDictionary alloc] init];
+    self.nativeViewExplicitTextKeys = [[NSMutableSet alloc] init];
     self.bridgeEnabledChildWebViewKeys = [[NSMutableSet alloc] init];
     self.allowedNavigationOrigins = @[ @"zero://app", @"zero://inline" ];
     self.allowedExternalURLs = @[];
@@ -311,6 +423,7 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
 
     [self createWindowWithId:1 title:(windowTitle.length > 0 ? windowTitle : self.appName) label:self.windowLabel x:x y:y width:width height:height restoreFrame:restoreFrame makeMain:YES];
     self.didShutdown = NO;
+    self.observesApplicationActivation = NO;
 
     return self;
 }
@@ -357,6 +470,9 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
     NSView *container = [[NSView alloc] initWithFrame:rect];
     container.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     WKWebView *webView = [[ZeroNativeWebView alloc] initWithFrame:container.bounds configuration:configuration];
+    ((ZeroNativeWebView *)webView).host = self;
+    ((ZeroNativeWebView *)webView).windowId = windowId;
+    [webView registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
     webView.wantsLayer = YES;
     webView.layer.zPosition = 0;
     webView.layer.backgroundColor = NSColor.clearColor.CGColor;
@@ -446,6 +562,358 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
     return NSMakeRect(x, nativeY, width, height);
 }
 
+- (NSString *)nativeViewKeyForWindow:(uint64_t)windowId label:(NSString *)label {
+    return [NSString stringWithFormat:@"%llu:%@", windowId, label ?: @""];
+}
+
+- (NSRect)viewFrameForContainer:(NSView *)container x:(double)x y:(double)y width:(double)width height:(double)height {
+    CGFloat nativeY = container.isFlipped ? y : container.bounds.size.height - y - height;
+    return NSMakeRect(x, nativeY, width, height);
+}
+
+- (NSView *)nativeParentViewForWindow:(uint64_t)windowId parent:(NSString *)parent {
+    if (parent.length > 0) {
+        NSView *parentView = self.nativeViews[[self nativeViewKeyForWindow:windowId label:parent]];
+        return parentView;
+    }
+    NSWindow *window = self.windows[@(windowId)] ?: (windowId == 1 ? self.window : nil);
+    return window.contentView;
+}
+
+- (NSView *)makeNativeViewWithKind:(NSInteger)kind label:(NSString *)label role:(NSString *)role text:(NSString *)text {
+    NSString *displayText = text.length > 0 ? text : (role.length > 0 ? role : (label ?: @""));
+    NSView *view = nil;
+    switch (kind) {
+        case ZERO_NATIVE_APPKIT_VIEW_TOOLBAR:
+        case ZERO_NATIVE_APPKIT_VIEW_TITLEBAR_ACCESSORY:
+        case ZERO_NATIVE_APPKIT_VIEW_STATUSBAR:
+        case ZERO_NATIVE_APPKIT_VIEW_SIDEBAR:
+        case ZERO_NATIVE_APPKIT_VIEW_SPLIT:
+        case ZERO_NATIVE_APPKIT_VIEW_STACK:
+        case ZERO_NATIVE_APPKIT_VIEW_SPACER: {
+            view = [[NSView alloc] initWithFrame:NSZeroRect];
+            view.wantsLayer = YES;
+            NSColor *color = NSColor.clearColor;
+            if (kind == ZERO_NATIVE_APPKIT_VIEW_TOOLBAR || kind == ZERO_NATIVE_APPKIT_VIEW_STATUSBAR || kind == ZERO_NATIVE_APPKIT_VIEW_TITLEBAR_ACCESSORY) {
+                color = NSColor.controlBackgroundColor;
+            } else if (kind == ZERO_NATIVE_APPKIT_VIEW_SIDEBAR) {
+                color = NSColor.windowBackgroundColor;
+            }
+            view.layer.backgroundColor = color.CGColor;
+            break;
+        }
+        case ZERO_NATIVE_APPKIT_VIEW_BUTTON: {
+            NSButton *button = [NSButton buttonWithTitle:(displayText.length > 0 ? displayText : @"Button") target:nil action:nil];
+            button.bezelStyle = NSBezelStyleRounded;
+            view = button;
+            break;
+        }
+        case ZERO_NATIVE_APPKIT_VIEW_ICON_BUTTON: {
+            NSButton *button = [NSButton buttonWithTitle:(displayText.length > 0 ? displayText : @"...") target:nil action:nil];
+            button.bezelStyle = NSBezelStyleTexturedRounded;
+            view = button;
+            break;
+        }
+        case ZERO_NATIVE_APPKIT_VIEW_CHECKBOX: {
+            NSButton *checkbox = [NSButton checkboxWithTitle:(displayText.length > 0 ? displayText : @"Checkbox") target:nil action:nil];
+            view = checkbox;
+            break;
+        }
+        case ZERO_NATIVE_APPKIT_VIEW_TOGGLE: {
+            NSButton *toggle = [NSButton buttonWithTitle:(displayText.length > 0 ? displayText : @"Toggle") target:nil action:nil];
+            [toggle setButtonType:NSButtonTypePushOnPushOff];
+            toggle.bezelStyle = NSBezelStyleRounded;
+            view = toggle;
+            break;
+        }
+        case ZERO_NATIVE_APPKIT_VIEW_SEGMENTED_CONTROL: {
+            NSSegmentedControl *segmented = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
+            segmented.segmentStyle = NSSegmentStyleTexturedRounded;
+            segmented.trackingMode = NSSegmentSwitchTrackingSelectOne;
+            [self applySegmentedControl:segmented text:(text.length > 0 ? text : @"One|Two")];
+            view = segmented;
+            break;
+        }
+        case ZERO_NATIVE_APPKIT_VIEW_PROGRESS_INDICATOR: {
+            NSProgressIndicator *indicator = [[NSProgressIndicator alloc] initWithFrame:NSZeroRect];
+            indicator.style = NSProgressIndicatorSpinningStyle;
+            indicator.indeterminate = YES;
+            [indicator startAnimation:nil];
+            view = indicator;
+            break;
+        }
+        case ZERO_NATIVE_APPKIT_VIEW_TEXT_FIELD: {
+            NSTextField *field = [[NSTextField alloc] initWithFrame:NSZeroRect];
+            field.stringValue = @"";
+            field.placeholderString = displayText.length > 0 ? displayText : label ?: @"";
+            field.bezelStyle = NSTextFieldRoundedBezel;
+            field.drawsBackground = YES;
+            field.editable = YES;
+            field.selectable = YES;
+            view = field;
+            break;
+        }
+        case ZERO_NATIVE_APPKIT_VIEW_SEARCH_FIELD: {
+            NSSearchField *field = [[NSSearchField alloc] initWithFrame:NSZeroRect];
+            field.stringValue = @"";
+            field.placeholderString = displayText.length > 0 ? displayText : @"Search";
+            view = field;
+            break;
+        }
+        case ZERO_NATIVE_APPKIT_VIEW_LABEL: {
+            NSTextField *text = [NSTextField labelWithString:(displayText.length > 0 ? displayText : label ?: @"")];
+            text.lineBreakMode = NSLineBreakByTruncatingTail;
+            view = text;
+            break;
+        }
+        default:
+            return nil;
+    }
+    view.identifier = label;
+    view.wantsLayer = YES;
+    view.accessibilityRole = ZeroNativeAccessibilityRoleForNativeViewKind(kind);
+    return view;
+}
+
+- (void)applySegmentedControl:(NSSegmentedControl *)control text:(NSString *)text {
+    NSArray<NSString *> *rawLabels = [(text.length > 0 ? text : @"One|Two") componentsSeparatedByString:@"|"];
+    NSMutableArray<NSString *> *labels = [NSMutableArray arrayWithCapacity:rawLabels.count];
+    for (NSString *raw in rawLabels) {
+        NSString *label = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (label.length > 0) [labels addObject:label];
+    }
+    if (labels.count == 0) [labels addObject:@"Segment"];
+    control.segmentCount = labels.count;
+    for (NSInteger index = 0; index < (NSInteger)labels.count; index++) {
+        [control setLabel:labels[index] forSegment:index];
+    }
+    if (control.selectedSegment < 0 && labels.count > 0) control.selectedSegment = 0;
+}
+
+- (void)applyNativeViewState:(NSView *)view enabled:(BOOL)enabled role:(NSString *)role accessibilityLabel:(NSString *)accessibilityLabel text:(NSString *)text {
+    if ([view respondsToSelector:@selector(setEnabled:)]) {
+        ((void (*)(id, SEL, BOOL))[view methodForSelector:@selector(setEnabled:)])(view, @selector(setEnabled:), enabled);
+    }
+    if (text) {
+        if ([view isKindOfClass:[NSSegmentedControl class]]) {
+            [self applySegmentedControl:(NSSegmentedControl *)view text:text];
+        } else if ([view isKindOfClass:[NSSearchField class]]) {
+            ((NSSearchField *)view).placeholderString = text;
+        } else if ([view isKindOfClass:[NSTextField class]]) {
+            NSTextField *field = (NSTextField *)view;
+            if (field.isEditable) {
+                field.placeholderString = text;
+            } else {
+                field.stringValue = text;
+            }
+        } else if ([view isKindOfClass:[NSButton class]]) {
+            ((NSButton *)view).title = text;
+        }
+    }
+    if (accessibilityLabel) {
+        [view setAccessibilityLabel:accessibilityLabel];
+    } else if (role) {
+        [view setAccessibilityLabel:(role.length > 0 ? role : (text.length > 0 ? text : @""))];
+    } else if (text) {
+        [view setAccessibilityLabel:text];
+    }
+}
+
+- (void)configureNativeView:(NSView *)view command:(NSString *)command key:(NSString *)key {
+    if (command.length > 0) {
+        self.nativeViewCommands[key] = command;
+    } else {
+        [self.nativeViewCommands removeObjectForKey:key];
+    }
+    if ([view isKindOfClass:[NSControl class]]) {
+        NSControl *control = (NSControl *)view;
+        control.target = command.length > 0 ? self : nil;
+        control.action = command.length > 0 ? @selector(emitNativeCommandForSender:) : nil;
+    }
+}
+
+- (void)emitNativeCommandForSender:(id)sender {
+    __block NSString *matchedKey = nil;
+    [self.nativeViews enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSView *view, BOOL *stop) {
+        if (view == sender) {
+            matchedKey = key;
+            *stop = YES;
+        }
+    }];
+    if (!matchedKey) return;
+    NSString *command = self.nativeViewCommands[matchedKey];
+    if (command.length == 0) return;
+    NSRange separator = [matchedKey rangeOfString:@":"];
+    if (separator.location == NSNotFound) return;
+    uint64_t windowId = (uint64_t)[[matchedKey substringToIndex:separator.location] longLongValue];
+    NSString *label = [matchedKey substringFromIndex:separator.location + 1];
+    const char *commandBytes = [command UTF8String];
+    const char *labelBytes = [label UTF8String];
+    [self emitEvent:(zero_native_appkit_event_t){
+        .kind = ZERO_NATIVE_APPKIT_EVENT_NATIVE_COMMAND,
+        .window_id = windowId,
+        .command_name = commandBytes,
+        .command_name_len = [command lengthOfBytesUsingEncoding:NSUTF8StringEncoding],
+        .view_label = labelBytes,
+        .view_label_len = [label lengthOfBytesUsingEncoding:NSUTF8StringEncoding],
+    }];
+}
+
+- (BOOL)createNativeViewInWindow:(uint64_t)windowId label:(NSString *)label kind:(NSInteger)kind parent:(NSString *)parent x:(double)x y:(double)y width:(double)width height:(double)height layer:(NSInteger)layer visible:(BOOL)visible enabled:(BOOL)enabled role:(NSString *)role accessibilityLabel:(NSString *)accessibilityLabel text:(NSString *)text command:(NSString *)command {
+    if (label.length == 0 || x < 0 || y < 0 || width < 0 || height < 0) return NO;
+    if (self.nativeViews.count >= ZeroNativeMaxNativeViews) return NO;
+    NSWindow *window = self.windows[@(windowId)] ?: (windowId == 1 ? self.window : nil);
+    if (!window || !window.contentView) return NO;
+
+    NSString *key = [self nativeViewKeyForWindow:windowId label:label];
+    if (self.nativeViews[key]) return NO;
+
+    NSView *parentView = [self nativeParentViewForWindow:windowId parent:parent];
+    if (!parentView) return NO;
+
+    NSView *view = [self makeNativeViewWithKind:kind label:label role:role text:text];
+    if (!view) return NO;
+    view.frame = [self viewFrameForContainer:parentView x:x y:y width:width height:height];
+    view.hidden = !visible;
+    view.layer.zPosition = layer;
+    NSString *initialText = text.length > 0 ? text : (role.length > 0 ? role : nil);
+    NSString *initialAccessibilityLabel = accessibilityLabel.length > 0 ? accessibilityLabel : nil;
+    [self applyNativeViewState:view enabled:enabled role:role accessibilityLabel:initialAccessibilityLabel text:initialText];
+    [self configureNativeView:view command:command key:key];
+
+    [parentView addSubview:view positioned:NSWindowAbove relativeTo:nil];
+    self.nativeViews[key] = view;
+    if (text.length > 0) {
+        [self.nativeViewExplicitTextKeys addObject:key];
+    } else {
+        [self.nativeViewExplicitTextKeys removeObject:key];
+    }
+    [self reorderWebViewsInWindow:windowId];
+    [self scheduleFrame];
+    return YES;
+}
+
+- (BOOL)updateNativeViewInWindow:(uint64_t)windowId label:(NSString *)label hasFrame:(BOOL)hasFrame x:(double)x y:(double)y width:(double)width height:(double)height hasLayer:(BOOL)hasLayer layer:(NSInteger)layer hasVisible:(BOOL)hasVisible visible:(BOOL)visible hasEnabled:(BOOL)hasEnabled enabled:(BOOL)enabled hasRole:(BOOL)hasRole role:(NSString *)role hasAccessibilityLabel:(BOOL)hasAccessibilityLabel accessibilityLabel:(NSString *)accessibilityLabel hasText:(BOOL)hasText text:(NSString *)text hasCommand:(BOOL)hasCommand command:(NSString *)command {
+    NSString *key = [self nativeViewKeyForWindow:windowId label:label];
+    NSView *view = self.nativeViews[key];
+    if (!view) return NO;
+    if (hasFrame) {
+        if (x < 0 || y < 0 || width < 0 || height < 0) return NO;
+        NSView *parent = view.superview;
+        if (!parent) return NO;
+        view.frame = [self viewFrameForContainer:parent x:x y:y width:width height:height];
+    }
+    if (hasLayer) {
+        view.wantsLayer = YES;
+        view.layer.zPosition = layer;
+    }
+    if (hasVisible) view.hidden = !visible;
+    BOOL shouldApplyState = hasEnabled || hasRole || hasAccessibilityLabel || hasText;
+    if (hasText) {
+        if (text.length > 0) {
+            [self.nativeViewExplicitTextKeys addObject:key];
+        } else {
+            [self.nativeViewExplicitTextKeys removeObject:key];
+        }
+    }
+    if (shouldApplyState) {
+        BOOL currentEnabled = enabled;
+        if (!hasEnabled) {
+            currentEnabled = YES;
+            if ([view respondsToSelector:@selector(isEnabled)]) {
+                currentEnabled = ((BOOL (*)(id, SEL))[view methodForSelector:@selector(isEnabled)])(view, @selector(isEnabled));
+            }
+        }
+        BOOL explicitText = [self.nativeViewExplicitTextKeys containsObject:key];
+        NSString *displayText = hasText ? text : ((!explicitText && hasRole) ? role : nil);
+        [self applyNativeViewState:view enabled:currentEnabled role:(hasRole ? role : nil) accessibilityLabel:(hasAccessibilityLabel ? accessibilityLabel : nil) text:displayText];
+    }
+    if (hasCommand) [self configureNativeView:view command:command key:key];
+    [self reorderWebViewsInWindow:windowId];
+    [self scheduleFrame];
+    return YES;
+}
+
+- (BOOL)setNativeViewFrameInWindow:(uint64_t)windowId label:(NSString *)label x:(double)x y:(double)y width:(double)width height:(double)height {
+    return [self updateNativeViewInWindow:windowId label:label hasFrame:YES x:x y:y width:width height:height hasLayer:NO layer:0 hasVisible:NO visible:YES hasEnabled:NO enabled:YES hasRole:NO role:@"" hasAccessibilityLabel:NO accessibilityLabel:@"" hasText:NO text:@"" hasCommand:NO command:@""];
+}
+
+- (BOOL)setNativeViewVisibleInWindow:(uint64_t)windowId label:(NSString *)label visible:(BOOL)visible {
+    return [self updateNativeViewInWindow:windowId label:label hasFrame:NO x:0 y:0 width:0 height:0 hasLayer:NO layer:0 hasVisible:YES visible:visible hasEnabled:NO enabled:YES hasRole:NO role:@"" hasAccessibilityLabel:NO accessibilityLabel:@"" hasText:NO text:@"" hasCommand:NO command:@""];
+}
+
+- (BOOL)focusNativeViewInWindow:(uint64_t)windowId label:(NSString *)label {
+    NSWindow *window = self.windows[@(windowId)] ?: (windowId == 1 ? self.window : nil);
+    if (!window) return NO;
+    if ([label isEqualToString:@"main"]) {
+        WKWebView *webView = [self webViewForWindowId:windowId];
+        if (!webView || webView.hidden) return NO;
+        [window makeKeyAndOrderFront:nil];
+        return [window makeFirstResponder:webView];
+    }
+    WKWebView *webView = self.childWebViews[[self webViewKeyForWindow:windowId label:label]];
+    if (webView && !webView.hidden) {
+        [window makeKeyAndOrderFront:nil];
+        return [window makeFirstResponder:webView];
+    }
+    NSView *view = self.nativeViews[[self nativeViewKeyForWindow:windowId label:label]];
+    if (!view || view.hidden) return NO;
+    window = view.window ?: window;
+    return [window makeFirstResponder:view];
+}
+
+- (BOOL)nativeView:(NSView *)candidate isInSubtreeRootedAt:(NSView *)root {
+    for (NSView *view = candidate; view; view = view.superview) {
+        if (view == root) return YES;
+    }
+    return NO;
+}
+
+- (NSArray<NSString *> *)nativeViewKeysInSubtreeForWindow:(uint64_t)windowId rootKey:(NSString *)rootKey {
+    NSView *root = self.nativeViews[rootKey];
+    if (!root) return @[];
+    NSString *prefix = [NSString stringWithFormat:@"%llu:", windowId];
+    NSMutableArray<NSString *> *keys = [[NSMutableArray alloc] init];
+    for (NSString *key in self.nativeViews) {
+        if (![key hasPrefix:prefix]) continue;
+        NSView *view = self.nativeViews[key];
+        if (view && [self nativeView:view isInSubtreeRootedAt:root]) {
+            [keys addObject:key];
+        }
+    }
+    return keys;
+}
+
+- (BOOL)closeNativeViewInWindow:(uint64_t)windowId label:(NSString *)label {
+    NSString *key = [self nativeViewKeyForWindow:windowId label:label];
+    NSArray<NSString *> *keys = [self nativeViewKeysInSubtreeForWindow:windowId rootKey:key];
+    if (keys.count == 0) return NO;
+    for (NSString *viewKey in keys) {
+        NSView *view = self.nativeViews[viewKey];
+        [view removeFromSuperview];
+        [self.nativeViews removeObjectForKey:viewKey];
+        [self.nativeViewCommands removeObjectForKey:viewKey];
+        [self.nativeViewExplicitTextKeys removeObject:viewKey];
+    }
+    [self reorderWebViewsInWindow:windowId];
+    [self scheduleFrame];
+    return YES;
+}
+
+- (void)closeNativeViewsInWindow:(uint64_t)windowId {
+    NSString *prefix = [NSString stringWithFormat:@"%llu:", windowId];
+    NSArray<NSString *> *keys = [self.nativeViews.allKeys copy];
+    for (NSString *key in keys) {
+        if (![key hasPrefix:prefix]) continue;
+        NSView *view = self.nativeViews[key];
+        [view removeFromSuperview];
+        [self.nativeViews removeObjectForKey:key];
+        [self.nativeViewCommands removeObjectForKey:key];
+        [self.nativeViewExplicitTextKeys removeObject:key];
+    }
+    [self reorderWebViewsInWindow:windowId];
+}
+
 - (BOOL)createWebViewInWindow:(uint64_t)windowId label:(NSString *)label url:(NSString *)url x:(double)x y:(double)y width:(double)width height:(double)height layer:(NSInteger)layer transparent:(BOOL)transparent bridgeEnabled:(BOOL)bridgeEnabled {
     if (label.length == 0 || url.length == 0 || width <= 0 || height <= 0 || x < 0 || y < 0) return NO;
     NSWindow *window = self.windows[@(windowId)] ?: (windowId == 1 ? self.window : nil);
@@ -460,6 +928,10 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
     if (existing) return NO;
 
     WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+    ZeroNativeAssetSchemeHandler *assetSchemeHandler = [self assetHandlerForWindowId:windowId];
+    if (assetSchemeHandler) {
+        [configuration setURLSchemeHandler:assetSchemeHandler forURLScheme:@"zero"];
+    }
     if (bridgeEnabled) {
         WKUserContentController *controller = [[WKUserContentController alloc] init];
         ZeroNativeBridgeScriptHandler *handler = [[ZeroNativeBridgeScriptHandler alloc] init];
@@ -475,6 +947,9 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
     }
 
     WKWebView *webview = [[ZeroNativeWebView alloc] initWithFrame:[self webViewFrameForWindow:window x:x y:y width:width height:height] configuration:configuration];
+    ((ZeroNativeWebView *)webview).host = self;
+    ((ZeroNativeWebView *)webview).windowId = windowId;
+    [webview registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
     webview.wantsLayer = YES;
     webview.layer.zPosition = layer;
     if (transparent) {
@@ -610,6 +1085,13 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
             [views addObject:view];
         }
     }
+    for (NSString *key in self.nativeViews) {
+        if (![key hasPrefix:prefix]) continue;
+        NSView *view = self.nativeViews[key];
+        if (view && view.superview == contentView) {
+            [views addObject:view];
+        }
+    }
 
     [views sortUsingComparator:^NSComparisonResult(NSView *first, NSView *second) {
         CGFloat firstLayer = first.layer.zPosition;
@@ -650,6 +1132,13 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
             [views addObject:webView];
         }
     }
+    for (NSString *key in self.nativeViews) {
+        if (![key hasPrefix:prefix]) continue;
+        NSView *view = self.nativeViews[key];
+        if (view && view.superview == contentView) {
+            [views addObject:view];
+        }
+    }
 
     [views sortUsingComparator:^NSComparisonResult(NSView *first, NSView *second) {
         CGFloat firstLayer = first.layer.zPosition;
@@ -664,10 +1153,12 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
     }];
 
     for (NSUInteger index = 0; index < views.count; index++) {
+        if (![views[index] isKindOfClass:[ZeroNativeWebView class]]) continue;
         ZeroNativeWebView *webView = (ZeroNativeWebView *)views[index];
         NSMutableArray<NSValue *> *coveredRects = [[NSMutableArray alloc] init];
         for (NSUInteger coverIndex = index + 1; coverIndex < views.count; coverIndex++) {
             NSView *coveringView = views[coverIndex];
+            if (coveringView.hidden) continue;
             NSRect intersection = NSIntersectionRect(webView.frame, coveringView.frame);
             if (NSIsEmptyRect(intersection)) continue;
             [coveredRects addObject:[NSValue valueWithRect:[webView convertRect:intersection fromView:contentView]]];
@@ -776,16 +1267,30 @@ static NSString *ZeroNativeAppKitBridgeScript(void) {
         "}"
         "function selector(value){return typeof value==='number'?{id:value}:{label:String(value)};}"
         "function ensureString(value,name){if(typeof value!=='string'||value.length===0){throw new TypeError(name+' must be a non-empty string');}return value;}"
+        "function ensureText(value,name){if(typeof value!=='string'){throw new TypeError(name+' must be a string');}return value;}"
         "function ensureNumber(value,name){if(typeof value!=='number'||!isFinite(value)){throw new TypeError(name+' must be a finite number');}return value;}"
+        "function commandPayload(value){if(typeof value==='string'){return {name:ensureString(value,'command')};}value=value||{};var name=value.name!=null?value.name:value.id;return {name:ensureString(name,'command')};}"
         "function validateWebViewSelector(options){if(options.label!=null){ensureString(options.label,'label');}if(options.windowId!=null&&(typeof options.windowId!=='number'||!isFinite(options.windowId)||options.windowId<0||Math.floor(options.windowId)!==options.windowId)){throw new TypeError('windowId must be a non-negative integer');}}"
         "function framePayload(options){options=options||{};validateWebViewSelector(options);var frame=options.frame||options;return {label:options.label,windowId:options.windowId,url:options.url,frame:{x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')}};}"
         "function createPayload(options){options=options||{};ensureString(options.url,'url');var payload=framePayload(options);if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.transparent!=null){payload.transparent=!!options.transparent;}if(options.bridge!=null){payload.bridge=!!options.bridge;}return payload;}"
         "function navigatePayload(options){options=options||{};validateWebViewSelector(options);ensureString(options.url,'url');return {label:options.label,windowId:options.windowId,url:options.url};}"
         "function closePayload(options){options=options||{};validateWebViewSelector(options);return {label:options.label,windowId:options.windowId};}"
         "function webviewHandle(info){return Object.freeze(Object.assign({},info,{setFrame:function(frame){return webviews.setFrame({label:info.label,windowId:info.windowId,frame:frame});},navigate:function(url){return webviews.navigate({label:info.label,windowId:info.windowId,url:url});},setZoom:function(zoom){return webviews.setZoom({label:info.label,windowId:info.windowId,zoom:zoom});},setLayer:function(layer){return webviews.setLayer({label:info.label,windowId:info.windowId,layer:layer});},close:function(){return webviews.close({label:info.label,windowId:info.windowId});}}));}"
+        "function validateViewSelector(options){options=options||{};ensureString(options.label,'label');if(options.windowId!=null&&(typeof options.windowId!=='number'||!isFinite(options.windowId)||options.windowId<0||Math.floor(options.windowId)!==options.windowId)){throw new TypeError('windowId must be a non-negative integer');}}"
+        "function viewSelectorPayload(options){if(typeof options==='string'){return {label:ensureString(options,'label')};}options=options||{};validateViewSelector(options);return {label:options.label,windowId:options.windowId};}"
+        "function optionalFramePayload(options){var frame=options.frame||((options.x!=null||options.y!=null||options.width!=null||options.height!=null)?options:null);if(!frame){return null;}return {x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')};}"
+        "function viewCreatePayload(options){options=options||{};validateViewSelector(options);ensureString(options.kind,'kind');var payload={label:options.label,kind:options.kind,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.parent!=null){payload.parent=ensureString(options.parent,'parent');}if(options.role!=null){payload.role=ensureText(options.role,'role');}if(options.accessibilityLabel!=null){payload.accessibilityLabel=ensureText(options.accessibilityLabel,'accessibilityLabel');}if(options.text!=null){payload.text=ensureText(options.text,'text');}if(options.command!=null){payload.command=ensureText(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.transparent!=null){payload.transparent=!!options.transparent;}if(options.bridge!=null){payload.bridge=!!options.bridge;}return payload;}"
+        "function viewPatchPayload(options){options=options||{};validateViewSelector(options);var payload={label:options.label,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.role!=null){payload.role=ensureText(options.role,'role');}if(options.accessibilityLabel!=null){payload.accessibilityLabel=ensureText(options.accessibilityLabel,'accessibilityLabel');}if(options.text!=null){payload.text=ensureText(options.text,'text');}if(options.command!=null){payload.command=ensureText(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}return payload;}"
+        "function viewFramePayload(options){options=options||{};validateViewSelector(options);var frame=options.frame||options;return {label:options.label,windowId:options.windowId,frame:{x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')}};}"
+        "function viewVisiblePayload(options){options=options||{};validateViewSelector(options);if(options.visible==null){throw new TypeError('visible is required');}return {label:options.label,windowId:options.windowId,visible:!!options.visible};}"
+        "function viewHandle(info){return Object.freeze(Object.assign({},info,{update:function(patch){return views.update(Object.assign({},patch||{},{label:info.label,windowId:info.windowId}));},setFrame:function(frame){return views.setFrame({label:info.label,windowId:info.windowId,frame:frame});},setVisible:function(visible){return views.setVisible({label:info.label,windowId:info.windowId,visible:visible});},focus:function(){return views.focus({label:info.label,windowId:info.windowId});},close:function(){return views.close({label:info.label,windowId:info.windowId});}}));}"
         "function on(name,callback){if(typeof callback!=='function'){throw new TypeError('callback must be a function');}var set=listeners.get(name);if(!set){set=new Set();listeners.set(name,set);}set.add(callback);return function(){off(name,callback);};}"
         "function off(name,callback){var set=listeners.get(name);if(set){set.delete(callback);if(set.size===0){listeners.delete(name);}}}"
         "function emit(name,detail){var set=listeners.get(name);if(set){Array.from(set).forEach(function(callback){callback(detail);});}window.dispatchEvent(new CustomEvent('zero-native:'+name,{detail:detail}));}"
+        "var commands=Object.freeze({"
+        "invoke:function(value){return invoke('zero-native.command.invoke',commandPayload(value));},"
+        "list:function(){return invoke('zero-native.command.list',{});}"
+        "});"
         "var windows=Object.freeze({"
         "create:function(options){return invoke('zero-native.window.create',options||{});},"
         "list:function(){return invoke('zero-native.window.list',{});},"
@@ -796,6 +1301,32 @@ static NSString *ZeroNativeAppKitBridgeScript(void) {
         "openFile:function(options){return invoke('zero-native.dialog.openFile',options||{});},"
         "saveFile:function(options){return invoke('zero-native.dialog.saveFile',options||{});},"
         "showMessage:function(options){return invoke('zero-native.dialog.showMessage',options||{});}"
+        "});"
+        "function clipboardReadPayload(value){value=value||{};return {mimeType:ensureString(value.mimeType||value.type||'text/plain','mimeType')};}"
+        "function clipboardWritePayload(value){if(typeof value==='string'){return {mimeType:'text/plain',data:value};}value=value||{};var data=value.data!=null?value.data:(value.text!=null?value.text:value.value);return {mimeType:ensureString(value.mimeType||value.type||'text/plain','mimeType'),data:ensureText(data,'data')};}"
+        "var clipboard=Object.freeze({"
+        "readText:function(){return invoke('zero-native.clipboard.readText',{});},"
+        "writeText:function(value){var text=typeof value==='string'?value:(value||{}).text;return invoke('zero-native.clipboard.writeText',{text:ensureText(text,'text')});},"
+        "read:function(value){return invoke('zero-native.clipboard.read',clipboardReadPayload(value));},"
+        "write:function(value){return invoke('zero-native.clipboard.write',clipboardWritePayload(value));}"
+        "});"
+        "var os=Object.freeze({"
+        "openUrl:function(value){var options=typeof value==='string'?{url:value}:(value||{});return invoke('zero-native.os.openUrl',{url:ensureString(options.url,'url')});},"
+        "showNotification:function(value){var options=typeof value==='string'?{title:value}:(value||{});var payload={title:ensureString(options.title,'title')};if(options.subtitle!=null){payload.subtitle=ensureString(options.subtitle,'subtitle');}if(options.body!=null){payload.body=ensureString(options.body,'body');}return invoke('zero-native.os.showNotification',payload);},"
+        "revealPath:function(value){var options=typeof value==='string'?{path:value}:(value||{});return invoke('zero-native.os.revealPath',{path:ensureString(options.path,'path')});},"
+        "addRecentDocument:function(value){var options=typeof value==='string'?{path:value}:(value||{});return invoke('zero-native.os.addRecentDocument',{path:ensureString(options.path,'path')});},"
+        "clearRecentDocuments:function(){return invoke('zero-native.os.clearRecentDocuments',{});}"
+        "});"
+        "function credentialPayload(value){value=value||{};return {service:ensureString(value.service,'service'),account:ensureString(value.account,'account')};}"
+        "function credentialSetPayload(value){var payload=credentialPayload(value);payload.secret=ensureString(value.secret!=null?value.secret:value.value,'secret');return payload;}"
+        "var credentials=Object.freeze({"
+        "set:function(value){return invoke('zero-native.credentials.set',credentialSetPayload(value));},"
+        "get:function(value){return invoke('zero-native.credentials.get',credentialPayload(value));},"
+        "delete:function(value){return invoke('zero-native.credentials.delete',credentialPayload(value));}"
+        "});"
+        "function platformFeaturePayload(value){if(typeof value==='string'){return {feature:ensureString(value,'feature')};}value=value||{};return {feature:ensureString(value.feature!=null?value.feature:value.name,'feature')};}"
+        "var platform=Object.freeze({"
+        "supports:function(value){return invoke('zero-native.platform.supports',platformFeaturePayload(value));}"
         "});"
         "function zoomPayload(options){options=options||{};validateWebViewSelector(options);return {label:options.label,windowId:options.windowId,zoom:ensureNumber(options.zoom,'zoom')};}"
         "function layerPayload(options){options=options||{};validateWebViewSelector(options);return {label:options.label,windowId:options.windowId,layer:ensureNumber(options.layer,'layer')};}"
@@ -808,7 +1339,18 @@ static NSString *ZeroNativeAppKitBridgeScript(void) {
         "setLayer:function(options){return invoke('zero-native.webview.setLayer',layerPayload(options));},"
         "close:function(options){return invoke('zero-native.webview.close',closePayload(options));}"
         "});"
-        "Object.defineProperty(window,'zero',{value:Object.freeze({invoke:invoke,on:on,off:off,windows:windows,dialogs:dialogs,webviews:webviews,_complete:complete,_emit:emit}),configurable:false});"
+        "var views=Object.freeze({"
+        "create:function(options){return invoke('zero-native.view.create',viewCreatePayload(options)).then(viewHandle);},"
+        "list:function(){return invoke('zero-native.view.list',{});},"
+        "update:function(options,patch){if(typeof options==='string'){return invoke('zero-native.view.update',viewPatchPayload(Object.assign({},patch||{},{label:options}))).then(viewHandle);}return invoke('zero-native.view.update',viewPatchPayload(options)).then(viewHandle);},"
+        "setFrame:function(options){return invoke('zero-native.view.setFrame',viewFramePayload(options)).then(viewHandle);},"
+        "setVisible:function(options){return invoke('zero-native.view.setVisible',viewVisiblePayload(options)).then(viewHandle);},"
+        "focus:function(options){return invoke('zero-native.view.focus',viewSelectorPayload(options)).then(viewHandle);},"
+        "focusNext:function(options){options=options||{};return invoke('zero-native.view.focusNext',{windowId:options.windowId}).then(viewHandle);},"
+        "focusPrevious:function(options){options=options||{};return invoke('zero-native.view.focusPrevious',{windowId:options.windowId}).then(viewHandle);},"
+        "close:function(options){return invoke('zero-native.view.close',viewSelectorPayload(options));}"
+        "});"
+        "Object.defineProperty(window,'zero',{value:Object.freeze({invoke:invoke,on:on,off:off,commands:commands,windows:windows,dialogs:dialogs,clipboard:clipboard,os:os,credentials:credentials,platform:platform,webviews:webviews,views:views,_complete:complete,_emit:emit}),configurable:false});"
         "})();";
 }
 
@@ -899,20 +1441,7 @@ static NSURL *ZeroNativeAssetEntryURL(NSString *origin, NSString *entryPath) {
 - (void)buildMenuBar {
     NSMenu *mainMenu = [[NSMenu alloc] initWithTitle:@""];
     [NSApp setMainMenu:mainMenu];
-
-    NSMenuItem *appMenuItem = [[NSMenuItem alloc] initWithTitle:self.appName action:nil keyEquivalent:@""];
-    [mainMenu addItem:appMenuItem];
-    NSMenu *appMenu = [[NSMenu alloc] initWithTitle:self.appName];
-    [appMenuItem setSubmenu:appMenu];
-    [appMenu addItem:[self menuItem:[NSString stringWithFormat:@"About %@", self.appName] action:@selector(orderFrontStandardAboutPanel:) key:@"" modifiers:0]];
-    [appMenu addItem:[NSMenuItem separatorItem]];
-    [appMenu addItem:[self menuItem:[NSString stringWithFormat:@"Preferences..."] action:@selector(showPreferences:) key:@"," modifiers:NSEventModifierFlagCommand]];
-    [appMenu addItem:[NSMenuItem separatorItem]];
-    [appMenu addItem:[self menuItem:[NSString stringWithFormat:@"Hide %@", self.appName] action:@selector(hide:) key:@"h" modifiers:NSEventModifierFlagCommand]];
-    [appMenu addItem:[self menuItem:@"Hide Others" action:@selector(hideOtherApplications:) key:@"h" modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagOption)]];
-    [appMenu addItem:[self menuItem:@"Show All" action:@selector(unhideAllApplications:) key:@"" modifiers:0]];
-    [appMenu addItem:[NSMenuItem separatorItem]];
-    [appMenu addItem:[self menuItem:[NSString stringWithFormat:@"Quit %@", self.appName] action:@selector(terminate:) key:@"q" modifiers:NSEventModifierFlagCommand]];
+    [self addApplicationMenuToMenu:mainMenu];
 
     NSMenuItem *fileMenuItem = [[NSMenuItem alloc] initWithTitle:@"File" action:nil keyEquivalent:@""];
     [mainMenu addItem:fileMenuItem];
@@ -940,6 +1469,22 @@ static NSURL *ZeroNativeAssetEntryURL(NSString *origin, NSString *entryPath) {
     [viewMenu addItem:[self menuItem:@"Toggle Web Inspector" action:@selector(toggleWebInspector:) key:@"i" modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagOption)]];
 }
 
+- (void)addApplicationMenuToMenu:(NSMenu *)mainMenu {
+    NSMenuItem *appMenuItem = [[NSMenuItem alloc] initWithTitle:self.appName action:nil keyEquivalent:@""];
+    [mainMenu addItem:appMenuItem];
+    NSMenu *appMenu = [[NSMenu alloc] initWithTitle:self.appName];
+    [appMenuItem setSubmenu:appMenu];
+    [appMenu addItem:[self menuItem:[NSString stringWithFormat:@"About %@", self.appName] action:@selector(orderFrontStandardAboutPanel:) key:@"" modifiers:0]];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    [appMenu addItem:[self menuItem:[NSString stringWithFormat:@"Preferences..."] action:@selector(showPreferences:) key:@"," modifiers:NSEventModifierFlagCommand]];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    [appMenu addItem:[self menuItem:[NSString stringWithFormat:@"Hide %@", self.appName] action:@selector(hide:) key:@"h" modifiers:NSEventModifierFlagCommand]];
+    [appMenu addItem:[self menuItem:@"Hide Others" action:@selector(hideOtherApplications:) key:@"h" modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagOption)]];
+    [appMenu addItem:[self menuItem:@"Show All" action:@selector(unhideAllApplications:) key:@"" modifiers:0]];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    [appMenu addItem:[self menuItem:[NSString stringWithFormat:@"Quit %@", self.appName] action:@selector(terminate:) key:@"q" modifiers:NSEventModifierFlagCommand]];
+}
+
 - (NSMenuItem *)menuItem:(NSString *)title action:(SEL)action key:(NSString *)key modifiers:(NSEventModifierFlags)modifiers {
     NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:key ?: @""];
     item.keyEquivalentModifierMask = modifiers;
@@ -947,6 +1492,67 @@ static NSURL *ZeroNativeAssetEntryURL(NSString *origin, NSString *entryPath) {
         item.target = self;
     }
     return item;
+}
+
+- (NSMenuItem *)commandMenuItem:(NSString *)title command:(NSString *)command key:(NSString *)key modifiers:(uint32_t)modifiers enabled:(BOOL)enabled checked:(BOOL)checked {
+    NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title ?: @"" action:@selector(menuCommandItemClicked:) keyEquivalent:key ?: @""];
+    item.target = self;
+    item.enabled = enabled;
+    item.representedObject = command ?: @"";
+    item.keyEquivalentModifierMask = ZeroNativeMenuModifierFlags(modifiers);
+    item.state = checked ? NSControlStateValueOn : NSControlStateValueOff;
+    return item;
+}
+
+- (uint64_t)activeCommandWindowId {
+    NSWindow *activeWindow = NSApp.keyWindow ?: self.window;
+    for (NSNumber *key in self.windows) {
+        if (self.windows[key] == activeWindow) return key.unsignedLongLongValue;
+    }
+    return 1;
+}
+
+- (void)menuCommandItemClicked:(NSMenuItem *)menuItem {
+    NSString *command = [menuItem.representedObject isKindOfClass:[NSString class]] ? (NSString *)menuItem.representedObject : @"";
+    if (command.length == 0) return;
+    const char *commandBytes = [command UTF8String];
+    [self emitEvent:(zero_native_appkit_event_t){
+        .kind = ZERO_NATIVE_APPKIT_EVENT_MENU_COMMAND,
+        .window_id = [self activeCommandWindowId],
+        .command_name = commandBytes,
+        .command_name_len = [command lengthOfBytesUsingEncoding:NSUTF8StringEncoding],
+    }];
+}
+
+- (void)setMenusWithTitles:(const char *const *)menuTitles titleLengths:(const size_t *)menuTitleLengths count:(size_t)menuCount itemMenuIndices:(const uint32_t *)itemMenuIndices itemLabels:(const char *const *)itemLabels itemLabelLengths:(const size_t *)itemLabelLengths itemCommands:(const char *const *)itemCommands itemCommandLengths:(const size_t *)itemCommandLengths itemKeys:(const char *const *)itemKeys itemKeyLengths:(const size_t *)itemKeyLengths itemModifiers:(const uint32_t *)itemModifiers itemSeparators:(const int *)itemSeparators itemEnabled:(const int *)itemEnabled itemChecked:(const int *)itemChecked itemCount:(size_t)itemCount {
+    if (menuCount == 0) {
+        [self buildMenuBar];
+        return;
+    }
+
+    NSMenu *mainMenu = [[NSMenu alloc] initWithTitle:@""];
+    [NSApp setMainMenu:mainMenu];
+    [self addApplicationMenuToMenu:mainMenu];
+
+    for (size_t menuIndex = 0; menuIndex < menuCount; menuIndex++) {
+        NSString *title = [[NSString alloc] initWithBytes:menuTitles[menuIndex] length:menuTitleLengths[menuIndex] encoding:NSUTF8StringEncoding] ?: @"";
+        NSMenuItem *topItem = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+        [mainMenu addItem:topItem];
+        NSMenu *menu = [[NSMenu alloc] initWithTitle:title];
+        [topItem setSubmenu:menu];
+
+        for (size_t itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+            if (itemMenuIndices[itemIndex] != menuIndex) continue;
+            if (itemSeparators[itemIndex]) {
+                [menu addItem:[NSMenuItem separatorItem]];
+                continue;
+            }
+            NSString *label = [[NSString alloc] initWithBytes:itemLabels[itemIndex] length:itemLabelLengths[itemIndex] encoding:NSUTF8StringEncoding] ?: @"";
+            NSString *command = [[NSString alloc] initWithBytes:itemCommands[itemIndex] length:itemCommandLengths[itemIndex] encoding:NSUTF8StringEncoding] ?: @"";
+            NSString *key = [[NSString alloc] initWithBytes:itemKeys[itemIndex] length:itemKeyLengths[itemIndex] encoding:NSUTF8StringEncoding] ?: @"";
+            [menu addItem:[self commandMenuItem:label command:command key:key modifiers:itemModifiers[itemIndex] enabled:(itemEnabled[itemIndex] != 0) checked:(itemChecked[itemIndex] != 0)]];
+        }
+    }
 }
 
 - (void)runWithCallback:(zero_native_appkit_event_callback_t)callback context:(void *)context {
@@ -968,6 +1574,7 @@ static NSURL *ZeroNativeAssetEntryURL(NSString *origin, NSString *entryPath) {
     [self emitResize];
     [self emitWindowFrame:YES];
 
+    [self startApplicationActivationObservers];
     [self scheduleFrame];
     [NSApp run];
 }
@@ -979,6 +1586,7 @@ static NSURL *ZeroNativeAssetEntryURL(NSString *origin, NSString *entryPath) {
         [NSEvent removeMonitor:self.shortcutEventMonitor];
         self.shortcutEventMonitor = nil;
     }
+    [self stopApplicationActivationObservers];
     [NSApp stop:nil];
     NSEvent *event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
                                         location:NSZeroPoint
@@ -996,6 +1604,36 @@ static NSURL *ZeroNativeAssetEntryURL(NSString *origin, NSString *entryPath) {
     if (self.callback) {
         self.callback(self.context, &event);
     }
+}
+
+- (void)startApplicationActivationObservers {
+    if (self.observesApplicationActivation) {
+        return;
+    }
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center addObserver:self selector:@selector(applicationDidBecomeActive:) name:NSApplicationDidBecomeActiveNotification object:NSApp];
+    [center addObserver:self selector:@selector(applicationDidResignActive:) name:NSApplicationDidResignActiveNotification object:NSApp];
+    self.observesApplicationActivation = YES;
+}
+
+- (void)stopApplicationActivationObservers {
+    if (!self.observesApplicationActivation) {
+        return;
+    }
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center removeObserver:self name:NSApplicationDidBecomeActiveNotification object:NSApp];
+    [center removeObserver:self name:NSApplicationDidResignActiveNotification object:NSApp];
+    self.observesApplicationActivation = NO;
+}
+
+- (void)applicationDidBecomeActive:(NSNotification *)notification {
+    (void)notification;
+    [self emitEvent:(zero_native_appkit_event_t){ .kind = ZERO_NATIVE_APPKIT_EVENT_APP_ACTIVATED }];
+}
+
+- (void)applicationDidResignActive:(NSNotification *)notification {
+    (void)notification;
+    [self emitEvent:(zero_native_appkit_event_t){ .kind = ZERO_NATIVE_APPKIT_EVENT_APP_DEACTIVATED }];
 }
 
 - (void)emitResize {
@@ -1058,7 +1696,7 @@ static NSURL *ZeroNativeAssetEntryURL(NSString *origin, NSString *entryPath) {
 }
 
 - (void)scheduleBridgeFrames {
-    self.bridgeFrameKeepalive = 30;
+    self.bridgeFrameKeepalive = ZeroNativeBridgeFrameKeepaliveFrames;
     [self scheduleFrame];
 }
 
@@ -1300,6 +1938,32 @@ static NSURL *ZeroNativeAssetEntryURL(NSString *origin, NSString *entryPath) {
     }];
 }
 
+- (BOOL)emitDroppedFileURLs:(NSArray<NSURL *> *)urls windowId:(uint64_t)windowId {
+    if (urls.count == 0) return NO;
+    NSMutableArray<NSString *> *paths = [NSMutableArray array];
+    for (NSURL *url in urls) {
+        if (!url.isFileURL || url.path.length == 0) continue;
+        [paths addObject:url.path];
+    }
+    if (paths.count == 0) return NO;
+    NSMutableData *data = [NSMutableData data];
+    const char separator = '\0';
+    for (NSString *path in paths) {
+        NSData *pathData = [path dataUsingEncoding:NSUTF8StringEncoding];
+        if (!pathData || pathData.length == 0) continue;
+        if (data.length > 0) [data appendBytes:&separator length:1];
+        [data appendData:pathData];
+    }
+    if (data.length == 0) return NO;
+    [self emitEvent:(zero_native_appkit_event_t){
+        .kind = ZERO_NATIVE_APPKIT_EVENT_FILES_DROPPED,
+        .window_id = windowId,
+        .drop_paths = data.bytes,
+        .drop_paths_len = data.length,
+    }];
+    return YES;
+}
+
 - (void)setShortcutsWithIds:(const char *const *)ids idLengths:(const size_t *)idLengths keys:(const char *const *)keys keyLengths:(const size_t *)keyLengths modifiers:(const uint32_t *)modifiers count:(size_t)count {
     NSMutableArray<ZeroNativeShortcut *> *items = [[NSMutableArray alloc] initWithCapacity:count];
     for (size_t index = 0; index < count; index++) {
@@ -1433,6 +2097,20 @@ static BOOL ZeroNativeShortcutModifiersMatch(uint32_t shortcutModifiers, NSEvent
     return hasCommand == needsCommand && hasControl == needsControl && hasOption == needsOption && shiftMatches;
 }
 
+static NSEventModifierFlags ZeroNativeMenuModifierFlags(uint32_t modifiers) {
+    NSEventModifierFlags flags = 0;
+    if ((modifiers & ZeroNativeShortcutModifierPrimary) != 0 || (modifiers & ZeroNativeShortcutModifierCommand) != 0) flags |= NSEventModifierFlagCommand;
+    if ((modifiers & ZeroNativeShortcutModifierControl) != 0) flags |= NSEventModifierFlagControl;
+    if ((modifiers & ZeroNativeShortcutModifierOption) != 0) flags |= NSEventModifierFlagOption;
+    if ((modifiers & ZeroNativeShortcutModifierShift) != 0) flags |= NSEventModifierFlagShift;
+    return flags;
+}
+
+static BOOL ZeroNativeWildcardPrefixHasPath(NSString *prefix) {
+    NSURLComponents *components = [NSURLComponents componentsWithString:prefix ?: @""];
+    return components.scheme.length > 0 && components.host.length > 0 && components.percentEncodedPath.length > 0;
+}
+
 static BOOL ZeroNativePolicyListMatches(NSArray<NSString *> *values, NSURL *url) {
     NSString *origin = ZeroNativeOriginForURL(url);
     NSString *absolute = url.absoluteString ?: @"";
@@ -1441,7 +2119,7 @@ static BOOL ZeroNativePolicyListMatches(NSArray<NSString *> *values, NSURL *url)
         if ([value isEqualToString:origin] || [value isEqualToString:absolute]) return YES;
         if ([value hasSuffix:@"*"]) {
             NSString *prefix = [value substringToIndex:value.length - 1];
-            if ([absolute hasPrefix:prefix] || [origin hasPrefix:prefix]) return YES;
+            if (ZeroNativeWildcardPrefixHasPath(prefix) && [absolute hasPrefix:prefix]) return YES;
         }
     }
     return NO;
@@ -1533,6 +2211,11 @@ void zero_native_appkit_set_security_policy(zero_native_appkit_host_t *host, con
     [object setAllowedNavigationOrigins:origins externalURLs:externalURLs externalAction:external_action];
 }
 
+void zero_native_appkit_set_menus(zero_native_appkit_host_t *host, const char *const *menu_titles, const size_t *menu_title_lens, size_t menu_count, const uint32_t *item_menu_indices, const char *const *item_labels, const size_t *item_label_lens, const char *const *item_commands, const size_t *item_command_lens, const char *const *item_keys, const size_t *item_key_lens, const uint32_t *item_modifiers, const int *item_separators, const int *item_enabled, const int *item_checked, size_t item_count) {
+    ZeroNativeAppKitHost *object = (__bridge ZeroNativeAppKitHost *)host;
+    [object setMenusWithTitles:menu_titles titleLengths:menu_title_lens count:menu_count itemMenuIndices:item_menu_indices itemLabels:item_labels itemLabelLengths:item_label_lens itemCommands:item_commands itemCommandLengths:item_command_lens itemKeys:item_keys itemKeyLengths:item_key_lens itemModifiers:item_modifiers itemSeparators:item_separators itemEnabled:item_enabled itemChecked:item_checked itemCount:item_count];
+}
+
 void zero_native_appkit_set_shortcuts(zero_native_appkit_host_t *host, const char *const *ids, const size_t *id_lens, const char *const *keys, const size_t *key_lens, const uint32_t *modifiers, size_t count) {
     ZeroNativeAppKitHost *object = (__bridge ZeroNativeAppKitHost *)host;
     [object setShortcutsWithIds:ids idLengths:id_lens keys:keys keyLengths:key_lens modifiers:modifiers count:count];
@@ -1557,6 +2240,51 @@ int zero_native_appkit_close_window(zero_native_appkit_host_t *host, uint64_t wi
     if (!object.windows[@(window_id)]) return 0;
     [object closeWindowWithId:window_id];
     return 1;
+}
+
+int zero_native_appkit_create_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *accessibility_label, size_t accessibility_label_len, const char *text, size_t text_len, const char *command, size_t command_len) {
+    ZeroNativeAppKitHost *object = (__bridge ZeroNativeAppKitHost *)host;
+    NSString *labelString = label ? [[NSString alloc] initWithBytes:label length:label_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *parentString = parent ? [[NSString alloc] initWithBytes:parent length:parent_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *roleString = role ? [[NSString alloc] initWithBytes:role length:role_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *accessibilityLabelString = accessibility_label ? [[NSString alloc] initWithBytes:accessibility_label length:accessibility_label_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *textString = text ? [[NSString alloc] initWithBytes:text length:text_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *commandString = command ? [[NSString alloc] initWithBytes:command length:command_len encoding:NSUTF8StringEncoding] : @"";
+    return [object createNativeViewInWindow:window_id label:labelString ?: @"" kind:kind parent:parentString ?: @"" x:x y:y width:width height:height layer:layer visible:(visible != 0) enabled:(enabled != 0) role:roleString ?: @"" accessibilityLabel:accessibilityLabelString ?: @"" text:textString ?: @"" command:commandString ?: @""] ? 1 : 0;
+}
+
+int zero_native_appkit_update_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_accessibility_label, const char *accessibility_label, size_t accessibility_label_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
+    ZeroNativeAppKitHost *object = (__bridge ZeroNativeAppKitHost *)host;
+    NSString *labelString = label ? [[NSString alloc] initWithBytes:label length:label_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *roleString = role ? [[NSString alloc] initWithBytes:role length:role_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *accessibilityLabelString = accessibility_label ? [[NSString alloc] initWithBytes:accessibility_label length:accessibility_label_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *textString = text ? [[NSString alloc] initWithBytes:text length:text_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *commandString = command ? [[NSString alloc] initWithBytes:command length:command_len encoding:NSUTF8StringEncoding] : @"";
+    return [object updateNativeViewInWindow:window_id label:labelString ?: @"" hasFrame:(has_frame != 0) x:x y:y width:width height:height hasLayer:(has_layer != 0) layer:layer hasVisible:(has_visible != 0) visible:(visible != 0) hasEnabled:(has_enabled != 0) enabled:(enabled != 0) hasRole:(has_role != 0) role:roleString ?: @"" hasAccessibilityLabel:(has_accessibility_label != 0) accessibilityLabel:accessibilityLabelString ?: @"" hasText:(has_text != 0) text:textString ?: @"" hasCommand:(has_command != 0) command:commandString ?: @""] ? 1 : 0;
+}
+
+int zero_native_appkit_set_view_frame(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height) {
+    ZeroNativeAppKitHost *object = (__bridge ZeroNativeAppKitHost *)host;
+    NSString *labelString = label ? [[NSString alloc] initWithBytes:label length:label_len encoding:NSUTF8StringEncoding] : @"";
+    return [object setNativeViewFrameInWindow:window_id label:labelString ?: @"" x:x y:y width:width height:height] ? 1 : 0;
+}
+
+int zero_native_appkit_set_view_visible(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, int visible) {
+    ZeroNativeAppKitHost *object = (__bridge ZeroNativeAppKitHost *)host;
+    NSString *labelString = label ? [[NSString alloc] initWithBytes:label length:label_len encoding:NSUTF8StringEncoding] : @"";
+    return [object setNativeViewVisibleInWindow:window_id label:labelString ?: @"" visible:(visible != 0)] ? 1 : 0;
+}
+
+int zero_native_appkit_focus_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len) {
+    ZeroNativeAppKitHost *object = (__bridge ZeroNativeAppKitHost *)host;
+    NSString *labelString = label ? [[NSString alloc] initWithBytes:label length:label_len encoding:NSUTF8StringEncoding] : @"";
+    return [object focusNativeViewInWindow:window_id label:labelString ?: @""] ? 1 : 0;
+}
+
+int zero_native_appkit_close_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len) {
+    ZeroNativeAppKitHost *object = (__bridge ZeroNativeAppKitHost *)host;
+    NSString *labelString = label ? [[NSString alloc] initWithBytes:label length:label_len encoding:NSUTF8StringEncoding] : @"";
+    return [object closeNativeViewInWindow:window_id label:labelString ?: @""] ? 1 : 0;
 }
 
 int zero_native_appkit_create_webview(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, const char *url, size_t url_len, double x, double y, double width, double height, int layer, int transparent, int bridge_enabled) {
@@ -1598,20 +2326,141 @@ int zero_native_appkit_close_webview(zero_native_appkit_host_t *host, uint64_t w
 }
 
 size_t zero_native_appkit_clipboard_read(zero_native_appkit_host_t *host, char *buffer, size_t buffer_len) {
+    return zero_native_appkit_clipboard_read_data(host, "text/plain", strlen("text/plain"), buffer, buffer_len);
+}
+
+void zero_native_appkit_clipboard_write(zero_native_appkit_host_t *host, const char *text, size_t text_len) {
+    (void)zero_native_appkit_clipboard_write_data(host, "text/plain", strlen("text/plain"), text, text_len);
+}
+
+size_t zero_native_appkit_clipboard_read_data(zero_native_appkit_host_t *host, const char *mime_type, size_t mime_type_len, char *buffer, size_t buffer_len) {
     (void)host;
-    NSString *value = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString] ?: @"";
-    NSData *data = [value dataUsingEncoding:NSUTF8StringEncoding];
-    size_t count = MIN(buffer_len, data.length);
+    NSString *type = ZeroNativePasteboardTypeForMime(mime_type, mime_type_len);
+    if (!type || !buffer) return 0;
+    NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+    NSData *data = nil;
+    if ([type isEqualToString:NSPasteboardTypeString] || [type isEqualToString:NSPasteboardTypeHTML]) {
+        NSString *value = [pasteboard stringForType:type] ?: @"";
+        data = [value dataUsingEncoding:NSUTF8StringEncoding];
+    } else {
+        data = [pasteboard dataForType:type] ?: [NSData data];
+    }
+    if (data.length > buffer_len) return data.length;
+    size_t count = data.length;
     memcpy(buffer, data.bytes, count);
     return count;
 }
 
-void zero_native_appkit_clipboard_write(zero_native_appkit_host_t *host, const char *text, size_t text_len) {
+int zero_native_appkit_clipboard_write_data(zero_native_appkit_host_t *host, const char *mime_type, size_t mime_type_len, const char *bytes, size_t bytes_len) {
     (void)host;
-    NSString *value = [[NSString alloc] initWithBytes:text length:text_len encoding:NSUTF8StringEncoding] ?: @"";
+    NSString *type = ZeroNativePasteboardTypeForMime(mime_type, mime_type_len);
+    if (!type || (!bytes && bytes_len > 0)) return 0;
     NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
     [pasteboard clearContents];
-    [pasteboard setString:value forType:NSPasteboardTypeString];
+    if ([type isEqualToString:NSPasteboardTypeString] || [type isEqualToString:NSPasteboardTypeHTML]) {
+        NSString *value = [[NSString alloc] initWithBytes:bytes length:bytes_len encoding:NSUTF8StringEncoding] ?: @"";
+        return [pasteboard setString:value forType:type] ? 1 : 0;
+    }
+    NSData *data = [NSData dataWithBytes:bytes length:bytes_len];
+    return [pasteboard setData:data forType:type] ? 1 : 0;
+}
+
+int zero_native_appkit_show_notification(zero_native_appkit_host_t *host, const char *title, size_t title_len, const char *subtitle, size_t subtitle_len, const char *body, size_t body_len) {
+    (void)host;
+    NSString *titleString = title ? [[NSString alloc] initWithBytes:title length:title_len encoding:NSUTF8StringEncoding] : @"";
+    if (titleString.length == 0) return 0;
+    NSString *subtitleString = subtitle ? [[NSString alloc] initWithBytes:subtitle length:subtitle_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *bodyString = body ? [[NSString alloc] initWithBytes:body length:body_len encoding:NSUTF8StringEncoding] : @"";
+    NSUserNotification *notification = [[NSUserNotification alloc] init];
+    notification.title = titleString;
+    if (subtitleString.length > 0) notification.subtitle = subtitleString;
+    if (bodyString.length > 0) notification.informativeText = bodyString;
+    [[NSUserNotificationCenter defaultUserNotificationCenter] deliverNotification:notification];
+    return 1;
+}
+
+int zero_native_appkit_open_external_url(zero_native_appkit_host_t *host, const char *url, size_t url_len) {
+    (void)host;
+    NSString *urlString = url ? [[NSString alloc] initWithBytes:url length:url_len encoding:NSUTF8StringEncoding] : @"";
+    if (urlString.length == 0) return 0;
+    NSURL *target = [NSURL URLWithString:urlString];
+    if (!target || target.scheme.length == 0) return 0;
+    return [[NSWorkspace sharedWorkspace] openURL:target] ? 1 : 0;
+}
+
+int zero_native_appkit_reveal_path(zero_native_appkit_host_t *host, const char *path, size_t path_len) {
+    (void)host;
+    NSString *pathString = path ? [[NSString alloc] initWithBytes:path length:path_len encoding:NSUTF8StringEncoding] : @"";
+    if (pathString.length == 0) return 0;
+    NSURL *fileURL = [NSURL fileURLWithPath:pathString];
+    if (!fileURL) return 0;
+    [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ fileURL ]];
+    return 1;
+}
+
+int zero_native_appkit_add_recent_document(zero_native_appkit_host_t *host, const char *path, size_t path_len) {
+    (void)host;
+    NSString *pathString = path ? [[NSString alloc] initWithBytes:path length:path_len encoding:NSUTF8StringEncoding] : @"";
+    if (pathString.length == 0) return 0;
+    NSURL *fileURL = [NSURL fileURLWithPath:pathString];
+    if (!fileURL) return 0;
+    [[NSDocumentController sharedDocumentController] noteNewRecentDocumentURL:fileURL];
+    return 1;
+}
+
+int zero_native_appkit_clear_recent_documents(zero_native_appkit_host_t *host) {
+    (void)host;
+    [[NSDocumentController sharedDocumentController] clearRecentDocuments:nil];
+    return 1;
+}
+
+int zero_native_appkit_set_credential(zero_native_appkit_host_t *host, const char *service, size_t service_len, const char *account, size_t account_len, const char *secret, size_t secret_len) {
+    (void)host;
+    @autoreleasepool {
+        NSString *serviceString = ZeroNativeStringFromBytes(service, service_len);
+        NSString *accountString = ZeroNativeStringFromBytes(account, account_len);
+        if (serviceString.length == 0 || accountString.length == 0 || !secret || secret_len == 0) return 0;
+        NSData *secretData = [NSData dataWithBytes:secret length:secret_len];
+        NSMutableDictionary *query = ZeroNativeCredentialQuery(serviceString, accountString);
+        NSDictionary *update = @{ (__bridge id)kSecValueData: secretData };
+        OSStatus status = SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)update);
+        if (status == errSecItemNotFound) {
+            query[(__bridge id)kSecValueData] = secretData;
+            status = SecItemAdd((__bridge CFDictionaryRef)query, NULL);
+        }
+        return status == errSecSuccess ? 1 : 0;
+    }
+}
+
+size_t zero_native_appkit_get_credential(zero_native_appkit_host_t *host, const char *service, size_t service_len, const char *account, size_t account_len, char *buffer, size_t buffer_len) {
+    (void)host;
+    @autoreleasepool {
+        NSString *serviceString = ZeroNativeStringFromBytes(service, service_len);
+        NSString *accountString = ZeroNativeStringFromBytes(account, account_len);
+        if (serviceString.length == 0 || accountString.length == 0 || !buffer) return 0;
+        NSMutableDictionary *query = ZeroNativeCredentialQuery(serviceString, accountString);
+        query[(__bridge id)kSecReturnData] = @YES;
+        query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+        CFTypeRef result = NULL;
+        OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+        if (status != errSecSuccess || !result) return 0;
+        NSData *data = CFBridgingRelease(result);
+        if (data.length > buffer_len) return data.length;
+        memcpy(buffer, data.bytes, data.length);
+        return data.length;
+    }
+}
+
+int zero_native_appkit_delete_credential(zero_native_appkit_host_t *host, const char *service, size_t service_len, const char *account, size_t account_len) {
+    (void)host;
+    @autoreleasepool {
+        NSString *serviceString = ZeroNativeStringFromBytes(service, service_len);
+        NSString *accountString = ZeroNativeStringFromBytes(account, account_len);
+        if (serviceString.length == 0 || accountString.length == 0) return 0;
+        NSMutableDictionary *query = ZeroNativeCredentialQuery(serviceString, accountString);
+        OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
+        return status == errSecSuccess ? 1 : 0;
+    }
 }
 
 static NSArray<NSString *> *ZeroNativeParseExtensions(const char *extensions, size_t len) {
@@ -1658,18 +2507,22 @@ zero_native_appkit_open_dialog_result_t zero_native_appkit_show_open_dialog(zero
         if ([panel runModal] != NSModalResponseOK) return result;
 
         size_t offset = 0;
+        BOOL overflow = NO;
         for (NSURL *url in panel.URLs) {
             NSString *path = url.path;
             NSData *data = [path dataUsingEncoding:NSUTF8StringEncoding];
             if (!data) continue;
             size_t needed = data.length + (result.count > 0 ? 1 : 0);
-            if (offset + needed > buffer_len) break;
+            if (needed > buffer_len - offset) {
+                overflow = YES;
+                break;
+            }
             if (result.count > 0) { buffer[offset] = '\n'; offset++; }
             memcpy(buffer + offset, data.bytes, data.length);
             offset += data.length;
             result.count++;
         }
-        result.bytes_written = offset;
+        result.bytes_written = overflow ? ZeroNativeOverflowSize(buffer_len) : offset;
     }
     return result;
 }
@@ -1695,7 +2548,8 @@ size_t zero_native_appkit_show_save_dialog(zero_native_appkit_host_t *host, cons
         NSString *path = panel.URL.path;
         NSData *data = [path dataUsingEncoding:NSUTF8StringEncoding];
         if (!data) return 0;
-        size_t count = MIN(buffer_len, data.length);
+        size_t count = data.length;
+        if (count > buffer_len) return ZeroNativeOverflowSize(buffer_len);
         memcpy(buffer, data.bytes, count);
         return count;
     }
