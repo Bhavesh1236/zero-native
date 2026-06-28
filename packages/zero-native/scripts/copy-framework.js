@@ -22,4 +22,4 @@ for (const dir of ['skills', 'skill-data']) {
   rmSync(target, { recursive: true, force: true });
   cpSync(source, target, { recursive: true });
   console.log(`✓ Copied ${dir} to ${target}`);
-}
+};
